@@ -408,10 +408,12 @@ void Navigator::initROS() {
 // ========== 回调函数 ==========
 
 void Navigator::stateCallback(const mavros_msgs::State::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     mavros_state_ = *msg;
 }
 
 void Navigator::localPosCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     current_odom_ = *msg;
     if (!has_odom_) {
         has_odom_ = true;
@@ -488,6 +490,7 @@ void Navigator::configReloadCallback(const std_msgs::String::ConstPtr& msg) {
 
 bool Navigator::commandCallback(uav_navigator::NavigatorCommand::Request& req,
                                 uav_navigator::NavigatorCommand::Response& res) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     ROS_INFO("[Navigator] Received command: %s", req.command.c_str());
 
     if (req.command == "START") {
@@ -571,6 +574,7 @@ bool Navigator::commandCallback(uav_navigator::NavigatorCommand::Request& req,
 // ========== 状态机处理 ==========
 
 void Navigator::stateMachineTimerCallback(const ros::TimerEvent& event) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     processStateMachine();
     publishStatus();
     publishMetrics();
@@ -826,7 +830,7 @@ void Navigator::handleTakeoff() {
 void Navigator::handleNavigating() {
     // 模式异常检测：飞行中模式被切出 OFFBOARD
     if (mavros_state_.mode != "OFFBOARD") {
-        if (mode_loss_time_.toSec() == 0.0) {
+        if (mode_loss_time_.isZero()) {
             mode_loss_time_ = ros::Time::now();
             ROS_WARN("[Navigator] Mode lost while navigating: %s", mavros_state_.mode.c_str());
         } else if ((ros::Time::now() - mode_loss_time_).toSec() > config_.mode_mismatch_tolerance) {
@@ -981,57 +985,71 @@ void Navigator::handleReturning() {
 // ========== setpoint 定时器 ==========
 
 void Navigator::setpointTimerCallback(const ros::TimerEvent& event) {
-    // 在 IDLE 和 PRE_FLIGHT 状态也需要发布setpoint以保持心跳
-    if (nav_state_ == State::IDLE || nav_state_ == State::PRE_FLIGHT || nav_state_ == State::ARMING) {
-        if (has_odom_) {
-            updateSetpointFromCurrentPosition();
-        }
-        setpoint_pub_.publish(current_setpoint_);
-    }
+    // 在锁内复制需要的数据，锁外发布（最小化锁持有时间，保证 20Hz setpoint 流不被阻塞）
+    geometry_msgs::PoseStamped setpoint_to_publish;
+    bool should_publish = false;
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
 
-    // TAKEOFF 状态：持续发布setpoint，同时计数预发布（PX4需要>2Hz持续流才能接受OFFBOARD）
-    if (nav_state_ == State::TAKEOFF) {
-        if (!offboard_pre_pub_complete_ && pre_pub_count_ > 0) {
-            pre_pub_count_--;
-            if (pre_pub_count_ == 0) {
-                offboard_pre_pub_complete_ = true;
-                ROS_INFO("[Navigator] OFFBOARD pre-publish complete (%d setpoints at %.1fHz, ~%.1f seconds), now requesting OFFBOARD mode",
-                         config_.offboard_pre_pub_count, config_.setpoint_rate,
-                         static_cast<double>(config_.offboard_pre_pub_count) / config_.setpoint_rate);
+        // 在 IDLE 和 PRE_FLIGHT 状态也需要发布setpoint以保持心跳
+        if (nav_state_ == State::IDLE || nav_state_ == State::PRE_FLIGHT || nav_state_ == State::ARMING) {
+            if (has_odom_) {
+                updateSetpointFromCurrentPosition();
+            }
+            setpoint_to_publish = current_setpoint_;
+            should_publish = true;
+        }
+
+        // TAKEOFF 状态：持续发布setpoint，同时计数预发布（PX4需要>2Hz持续流才能接受OFFBOARD）
+        if (nav_state_ == State::TAKEOFF) {
+            if (!offboard_pre_pub_complete_ && pre_pub_count_ > 0) {
+                pre_pub_count_--;
+                if (pre_pub_count_ == 0) {
+                    offboard_pre_pub_complete_ = true;
+                    ROS_INFO("[Navigator] OFFBOARD pre-publish complete (%d setpoints at %.1fHz, ~%.1f seconds), now requesting OFFBOARD mode",
+                             config_.offboard_pre_pub_count, config_.setpoint_rate,
+                             static_cast<double>(config_.offboard_pre_pub_count) / config_.setpoint_rate);
+                }
+            }
+            setpoint_to_publish = current_setpoint_;
+            should_publish = true;
+        }
+
+        // 其他飞行状态由定时器统一发布setpoint
+        if (nav_state_ == State::NAVIGATING || nav_state_ == State::HOVERING ||
+            nav_state_ == State::LANDING || nav_state_ == State::EMERGENCY || nav_state_ == State::RETURNING) {
+            setpoint_to_publish = current_setpoint_;
+            should_publish = true;
+        }
+
+        // 调试：使用 ROS_INFO_THROTTLE 替代 static 局部变量，线程安全
+        ROS_INFO_THROTTLE(5.0, "[Navigator][DEBUG] state=%s setpoint=(%.2f, %.2f, %.2f)",
+                 stateToString(nav_state_),
+                 current_setpoint_.pose.position.x,
+                 current_setpoint_.pose.position.y,
+                 current_setpoint_.pose.position.z);
+
+        // 记录 setpoint 发布时间并计数
+        last_setpoint_pub_time_ = ros::Time::now();
+        setpoint_pub_count_++;
+
+        // setpoint 流健康检查（仅在非 IDLE/PRE_FLIGHT 且未紧急时）
+        if (nav_state_ != State::IDLE && nav_state_ != State::PRE_FLIGHT && nav_state_ != State::EMERGENCY && nav_state_ != State::LANDED) {
+            ros::Duration elapsed = ros::Time::now() - setpoint_rate_check_start_;
+            if (elapsed.toSec() >= 1.0) {
+                double actual_rate = setpoint_pub_count_ / elapsed.toSec();
+                if (actual_rate < config_.min_setpoint_rate_hz) {
+                    ROS_ERROR_THROTTLE(2.0, "[Navigator] Setpoint stream unhealthy: %.1f Hz (min %.1f Hz)",
+                                       actual_rate, config_.min_setpoint_rate_hz);
+                }
+                setpoint_pub_count_ = 0;
+                setpoint_rate_check_start_ = ros::Time::now();
             }
         }
-        setpoint_pub_.publish(current_setpoint_);
     }
-
-    // 其他飞行状态由定时器统一发布setpoint
-    if (nav_state_ == State::NAVIGATING || nav_state_ == State::HOVERING ||
-        nav_state_ == State::LANDING || nav_state_ == State::EMERGENCY || nav_state_ == State::RETURNING) {
-        setpoint_pub_.publish(current_setpoint_);
-    }
-
-    // 调试：使用 ROS_INFO_THROTTLE 替代 static 局部变量，线程安全
-    ROS_INFO_THROTTLE(5.0, "[Navigator][DEBUG] state=%s setpoint=(%.2f, %.2f, %.2f)",
-             stateToString(nav_state_),
-             current_setpoint_.pose.position.x,
-             current_setpoint_.pose.position.y,
-             current_setpoint_.pose.position.z);
-
-    // 全局：记录 setpoint 发布时间并计数
-    last_setpoint_pub_time_ = ros::Time::now();
-    setpoint_pub_count_++;
-
-    // 全局 setpoint 流健康检查（仅在非 IDLE/PRE_FLIGHT 且未紧急时）
-    if (nav_state_ != State::IDLE && nav_state_ != State::PRE_FLIGHT && nav_state_ != State::EMERGENCY && nav_state_ != State::LANDED) {
-        ros::Duration elapsed = ros::Time::now() - setpoint_rate_check_start_;
-        if (elapsed.toSec() >= 1.0) {
-            double actual_rate = setpoint_pub_count_ / elapsed.toSec();
-            if (actual_rate < config_.min_setpoint_rate_hz) {
-                ROS_ERROR_THROTTLE(2.0, "[Navigator] Setpoint stream unhealthy: %.1f Hz (min %.1f Hz)",
-                                   actual_rate, config_.min_setpoint_rate_hz);
-            }
-            setpoint_pub_count_ = 0;
-            setpoint_rate_check_start_ = ros::Time::now();
-        }
+    // 锁外发布，不阻塞其他回调
+    if (should_publish) {
+        setpoint_pub_.publish(setpoint_to_publish);
     }
 }
 
@@ -1187,9 +1205,9 @@ bool Navigator::checkPreFlight() {
         return false;
     }
 
-    // 检查位置数据是否有效（z不为0表示传感器正常工作）
-    if (current_odom_.pose.pose.position.z == 0.0) {
-        ROS_WARN_THROTTLE(2.0, "[Navigator] Pre-flight check: position height is 0, sensor may not be initialized...");
+    // 检查位置数据是否有效（使用容差比较，避免浮点精度问题）
+    if (std::abs(current_odom_.pose.pose.position.z) < 1e-6) {
+        ROS_WARN_THROTTLE(2.0, "[Navigator] Pre-flight check: position height near zero, sensor may not be initialized...");
         return false;
     }
 

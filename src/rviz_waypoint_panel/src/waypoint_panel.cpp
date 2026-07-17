@@ -801,71 +801,80 @@ void WaypointPanel::loadConfigFromFile() {
 
     logInfo(QString("正在加载配置文件: %1").arg(file_path));
 
-    // 1) 使用 rosparam load 将参数上传到参数服务器（节点重启后生效）
+    // 使用异步 QProcess，不阻塞 UI 线程
     QProcess *proc = new QProcess(this);
     QStringList args;
     args << "load" << file_path;
-    proc->start("rosparam", args);
-    if (!proc->waitForFinished(5000)) {
-        logError("rosparam load 超时");
-        proc->kill();
-        delete proc;
-        return;
-    }
-    int exit_code = proc->exitCode();
-    delete proc;
-    if (exit_code != 0) {
-        logError(QString("rosparam load 失败，退出码: %1").arg(exit_code));
-        return;
-    }
 
-    // 2) 读取 YAML 并在面板只读显示关键参数
-    QString display_text;
-    try {
-        YAML::Node root = YAML::LoadFile(file_path.toStdString());
-        display_text += QString("配置文件: %1\n").arg(file_path);
-        display_text += "──────────────────────────────\n";
+    QObject::connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+        this, [this, file_path, proc](int exitCode, QProcess::ExitStatus) {
+            proc->deleteLater();
 
-        auto append_section = [&](const QString &title, const YAML::Node &node) {
-            QString section = title + "\n";
-            if (node && node.IsMap()) {
-                for (const auto &kv : node) {
-                    std::string key = kv.first.as<std::string>();
-                    std::string value;
-                    if (kv.second.IsScalar()) {
-                        value = kv.second.as<std::string>();
-                    } else {
-                        std::stringstream ss;
-                        ss << kv.second;
-                        value = ss.str();
-                    }
-                    section += QString("  %1: %2\n").arg(QString::fromStdString(key), QString::fromStdString(value));
-                }
+            if (exitCode != 0) {
+                logError(QString("rosparam load 失败，退出码: %1").arg(exitCode));
+                return;
             }
-            return section;
-        };
 
-        display_text += append_section("[flight]", root["flight"]);
-        display_text += append_section("[waypoint]", root["waypoint"]);
-        display_text += append_section("[safety]", root["safety"]);
-        display_text += append_section("[offboard_safety]", root["offboard_safety"]);
-        display_text += append_section("[position_safety]", root["position_safety"]);
-        display_text += append_section("[experiment]", root["experiment"]);
-        display_text += append_section("[panel]", root["panel"]);
-    } catch (const std::exception &e) {
-        logError(QString("解析 YAML 失败: %1").arg(e.what()));
-        display_text = QString("配置文件已加载，但解析失败: %1").arg(e.what());
-    }
-    config_display_->setPlainText(display_text);
+            // 读取 YAML 并在面板只读显示关键参数
+            QString display_text;
+            try {
+                YAML::Node root = YAML::LoadFile(file_path.toStdString());
+                display_text += QString("配置文件: %1\n").arg(file_path);
+                display_text += "──────────────────────────────\n";
 
-    // 3) 发布加载事件，供 logger 后台检阅
-    publishConfigLoaded(file_path, display_text);
+                auto append_section = [&](const QString &title, const YAML::Node &node) {
+                    QString section = title + "\n";
+                    if (node && node.IsMap()) {
+                        for (const auto &kv : node) {
+                            std::string key = kv.first.as<std::string>();
+                            std::string value;
+                            if (kv.second.IsScalar()) {
+                                value = kv.second.as<std::string>();
+                            } else {
+                                std::stringstream ss;
+                                ss << kv.second;
+                                value = ss.str();
+                            }
+                            section += QString("  %1: %2\n").arg(QString::fromStdString(key), QString::fromStdString(value));
+                        }
+                    }
+                    return section;
+                };
 
-    // 4) 通知所有核心节点立即重新加载配置（navigator, safety_monitor 等订阅此话题）
-    std_msgs::String reload_msg;
-    reload_msg.data = file_path.toStdString();
-    config_reload_pub_.publish(reload_msg);
-    ROS_INFO("[WaypointPanel] Published config reload event to '%s'", config_.config_reload_topic.c_str());
+                display_text += append_section("[flight]", root["flight"]);
+                display_text += append_section("[waypoint]", root["waypoint"]);
+                display_text += append_section("[safety]", root["safety"]);
+                display_text += append_section("[offboard_safety]", root["offboard_safety"]);
+                display_text += append_section("[position_safety]", root["position_safety"]);
+                display_text += append_section("[experiment]", root["experiment"]);
+                display_text += append_section("[panel]", root["panel"]);
+            } catch (const std::exception &e) {
+                logError(QString("解析 YAML 失败: %1").arg(e.what()));
+                display_text = QString("配置文件已加载，但解析失败: %1").arg(e.what());
+            }
+            config_display_->setPlainText(display_text);
+
+            // 发布加载事件
+            publishConfigLoaded(file_path, display_text);
+
+            // 通知所有核心节点立即重新加载配置
+            std_msgs::String reload_msg;
+            reload_msg.data = file_path.toStdString();
+            config_reload_pub_.publish(reload_msg);
+            ROS_INFO("[WaypointPanel] Published config reload event to '%s'", config_.config_reload_topic.c_str());
+
+            logInfo("配置加载完成，所有核心节点已同步更新");
+        });
+
+    // 超时保护：5 秒后强制终止
+    QTimer::singleShot(5000, proc, [proc, this]() {
+        if (proc->state() == QProcess::Running) {
+            logError("rosparam load 超时");
+            proc->kill();
+        }
+    });
+
+    proc->start("rosparam", args);
 
     // 5) 面板自身重新加载配置（更新本地默认值）
     loadConfig();
@@ -1173,14 +1182,8 @@ void WaypointPanel::loadWaypoints() {
             }
 
             updatePlanMakerStatus();
-
-            // 尝试从 latched params topic 获取 per-waypoint 参数（hover_time/speed）
-            std_msgs::Float64MultiArray::ConstPtr params =
-                ros::topic::waitForMessage<std_msgs::Float64MultiArray>(
-                    "uav/waypoints/params", ros::Duration(1.0));
-            if (params && params->data.size() >= plan_maker_points_.size() * 2) {
-                receiveWaypointParams(params);
-            }
+            // per-waypoint 参数（hover_time/speed）由 receiveWaypointParams 回调异步更新，
+            // 不再使用阻塞式 waitForMessage 冻结 UI
         } else {
             logWarn(QString::fromStdString(srv.response.message));
         }
@@ -1403,40 +1406,53 @@ void WaypointPanel::emergencyStop() {
 
 // ========== 系统控制 ==========
 void WaypointPanel::launchGroundStation() {
-    logInfo("Launching ground station core nodes...");
+    logInfo("启动地面站核心节点...");
     if (!ros::master::check()) {
-        logError("roscore is not running. Please start roscore first.");
+        logError("roscore 未运行，请先启动 roscore");
         return;
     }
 
-    // Use bash to source workspaces and run roslaunch in background.
-    // Redirect stdout/stderr to avoid messing up RViz terminal, but keep it alive.
-    std::string cmd = "bash -lc 'source /opt/ros/noetic/setup.bash && source " +
-                      std::string(getenv("HOME") ? getenv("HOME") : "/home/groundstation") +
-                      "/catkin_ws/devel/setup.bash && roslaunch uav_navigator ground_station.launch > /tmp/ground_station_rviz.log 2>&1 &'";
+    // 使用 QProcess::startDetached 异步启动，不阻塞 UI 线程
+    QString home = QString::fromUtf8(getenv("HOME") ? getenv("HOME") : "/home/groundstation");
+    QString cmd = QString(
+        "bash -lc 'source /opt/ros/noetic/setup.bash && "
+        "source %1/catkin_ws/devel/setup.bash && "
+        "roslaunch uav_navigator ground_station.launch "
+        "> /tmp/ground_station_rviz.log 2>&1 &'").arg(home);
 
-    int result = system(cmd.c_str());
-    if (result == 0) {
-        logInfo("Ground station launch command sent");
+    bool ok = QProcess::startDetached(cmd);
+    if (ok) {
+        logInfo("地面站启动命令已发送");
         logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
         launch_gs_button_->setEnabled(false);
         kill_gs_button_->setEnabled(true);
     } else {
-        logError("Failed to send ground station launch command");
+        logError("启动地面站失败");
     }
 }
 
 void WaypointPanel::killGroundStation() {
-    logInfo("Stopping ground station core nodes...");
-    // Use rosnode kill for clean shutdown; pkill -f is too broad and dangerous.
-    int result = system("rosnode kill /uav_navigator /uav_safety_monitor /uav_waypoint_manager /uav_logger /uav_experiment_recorder");
-    if (result == 0) {
-        logInfo("Ground station nodes stopped (rosnode kill sent)");
-        launch_gs_button_->setEnabled(true);
-        kill_gs_button_->setEnabled(false);
-    } else {
-        logError("Failed to stop ground station nodes");
-    }
+    logInfo("正在停止地面站核心节点...");
+    // 使用 QProcess 异步执行，避免阻塞 UI 线程
+    QProcess *proc = new QProcess(this);
+    QObject::connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+        this, [this, proc](int exitCode, QProcess::ExitStatus) {
+            if (exitCode == 0) {
+                logInfo("地面站节点已停止");
+                launch_gs_button_->setEnabled(true);
+                kill_gs_button_->setEnabled(false);
+            } else {
+                logError("停止地面站节点失败 (exit code: " + QString::number(exitCode) + ")");
+            }
+            proc->deleteLater();
+        });
+    proc->start("rosnode", QStringList()
+        << "kill"
+        << "/uav_navigator"
+        << "/uav_safety_monitor"
+        << "/uav_waypoint_manager"
+        << "/uav_logger"
+        << "/uav_experiment_recorder");
 }
 
 void WaypointPanel::oneKeyTakeoff() {
@@ -1497,14 +1513,7 @@ void WaypointPanel::executeMission() {
             setPlanMakerPhase(CONNECTED);
         }
         updatePlanMakerStatus();
-
-        // 尝试获取 per-waypoint params
-        std_msgs::Float64MultiArray::ConstPtr params =
-            ros::topic::waitForMessage<std_msgs::Float64MultiArray>(
-                "uav/waypoints/params", ros::Duration(1.0));
-        if (params && params->data.size() >= plan_maker_points_.size() * 2) {
-            receiveWaypointParams(params);
-        }
+        // per-waypoint 参数由 receiveWaypointParams 回调异步更新
 
         // 安全确认弹窗
         int ret = QMessageBox::question(this, "确认执行任务",
