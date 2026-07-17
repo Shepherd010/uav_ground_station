@@ -5,10 +5,8 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Navigation1
-        - /Navigation1/Waypoint Markers1
         - /Navigation1/Plan Maker Points1
         - /Navigation1/Plan Maker Trajectory1
-        - /Navigation1/Planned Trajectory1
         - /Navigation1/Real Trajectory1
       Splitter Ratio: 0.6470588445663452
     Tree Height: 598
@@ -21,6 +19,7 @@ Toolbars:
 Visualization Manager:
   Class: ""
   Displays:
+    # ===== 坐标系 =====
     - Class: rviz/Group
       Displays:
         - Class: rviz/Axes
@@ -41,6 +40,13 @@ Visualization Manager:
           Value: true
       Enabled: true
       Name: Frames
+
+    # ===== 点云（DLIO SLAM 稠密地图）=====
+    # 性能说明：
+    #   - Decay Time=20s: 点云 20 秒后自动消失，平衡可视化范围与渲染性能
+    #   - Queue Size=5: 减少消息缓冲，降低内存占用
+    #   - 以 10Hz 点云频率计，20s ≈ 200 帧点云同时可见
+    #   - 如需看到更大的地图范围，适当增加 Decay Time；若卡顿则减小
     - Class: rviz/Group
       Displays:
         - Alpha: 0.1
@@ -54,7 +60,7 @@ Visualization Manager:
           Class: rviz/PointCloud2
           Color: 0; 255; 0
           Color Transformer: Intensity
-          Decay Time: 9999
+          Decay Time: 20
           Enabled: true
           Invert Rainbow: false
           Max Color: 255; 255; 255
@@ -63,7 +69,7 @@ Visualization Manager:
           Min Intensity: 0
           Name: Dense Map
           Position Transformer: XYZ
-          Queue Size: 10
+          Queue Size: 5
           Selectable: true
           Size (Pixels): 1
           Size (m): 0.009999999776482582
@@ -75,6 +81,11 @@ Visualization Manager:
           Value: true
       Enabled: true
       Name: Point Clouds
+
+    # ===== 里程计轨迹（DLIO Path）=====
+    # 性能说明：
+    #   - Line Style=Lines: 简单线段渲染，比 Billboards 快 3-5 倍
+    #   - Buffer Length=1: 只保留最新一条 path 消息
     - Class: rviz/Group
       Displays:
         - Alpha: 1
@@ -85,7 +96,7 @@ Visualization Manager:
           Head Diameter: 0.30000001192092896
           Head Length: 0.20000000298023224
           Length: 0.30000001192092896
-          Line Style: Billboards
+          Line Style: Lines
           Line Width: 0.019999999552965164
           Name: DLIO Trajectory
           Offset:
@@ -104,22 +115,28 @@ Visualization Manager:
       Enabled: true
       Name: Odometry
 
-    # ===== 导航相关 Display =====
+    # ===== 导航可视化 =====
+    # 包含：航点标记（球+箭头+编号）、规划轨迹、实际飞行轨迹
+    # 注意：旧版 Waypoint Markers (visualization_marker) 和 Planned Trajectory (uav/trajectory/planned) 已移除
+    #       面板统一使用 MarkerArray (uav/plan_maker/points) + Path (uav/plan_maker/trajectory) 发布
     - Class: rviz/Group
       Displays:
+        # --- 航点标记：位置球 + 方向箭头 + 数字编号 ---
         - Class: rviz/MarkerArray
           Enabled: true
           Marker Topic: /uav/plan_maker/points
           Name: Plan Maker Points
           Namespaces:
             uav_plan_maker_points: true
+            uav_plan_maker_arrows: true
             uav_plan_maker_numbers: true
           Queue Size: 100
           Value: true
+        # --- 规划轨迹（黄色，用户编辑的航点连线）---
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
-          Color: 255; 165; 0
+          Color: 255; 193; 7
           Enabled: true
           Head Diameter: 0.2
           Head Length: 0.1
@@ -140,50 +157,17 @@ Visualization Manager:
           Topic: /uav/plan_maker/trajectory
           Unreliable: false
           Value: true
-        - Alpha: 1
-          Class: rviz/Marker
-          Enabled: true
-          Marker Topic: /visualization_marker
-          Name: Waypoint Markers
-          Namespaces:
-            uav_waypoint_arrow: true
-            uav_waypoint_number: true
-          Queue Size: 100
-          Value: true
+        # --- 实际飞行轨迹（红色，导航中真实路径）---
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
-          Color: 0; 255; 0
+          Color: 244; 67; 54
           Enabled: true
           Head Diameter: 0.2
           Head Length: 0.1
           Length: 0.2
           Line Style: Lines
           Line Width: 0.08
-          Name: Planned Trajectory
-          Offset:
-            X: 0
-            Y: 0
-            Z: 0
-          Pose Color: 255; 85; 255
-          Pose Style: None
-          Queue Size: 10
-          Radius: 0.02
-          Shaft Diameter: 0.05
-          Shaft Length: 0.05
-          Topic: /uav/trajectory/planned
-          Unreliable: false
-          Value: true
-        - Alpha: 1
-          Buffer Length: 1
-          Class: rviz/Path
-          Color: 255; 0; 0
-          Enabled: true
-          Head Diameter: 0.2
-          Head Length: 0.1
-          Length: 0.2
-          Line Style: Lines
-          Line Width: 0.05
           Name: Real Trajectory
           Offset:
             X: 0
@@ -198,6 +182,7 @@ Visualization Manager:
           Topic: /uav/trajectory/real
           Unreliable: false
           Value: true
+        # --- 无人机当前姿态 ---
         - Alpha: 1
           Class: rviz/Axes
           Enabled: true

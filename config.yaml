@@ -52,6 +52,7 @@ services:
 paths:
   default_save: "/home/groundstation/waypoints.xml"
   default_load: "/home/groundstation/waypoints.xml"
+  default_frame_id: "map"
 
 # ============================================================================
 # 第二类：安全与阈值参数
@@ -124,6 +125,7 @@ validation:
   min_waypoint_spacing: 0.3
   max_height: 2.0
   min_height: 0.5
+  duplicate_threshold: 0.01     # 重复航点判定阈值（米），小于此距离视为重复
 
 publish_rate: 1.0
 
@@ -138,6 +140,8 @@ panel:
   marker_topic: "visualization_marker"
   waypoint_input_topic: "uav/waypoints/input"
   waypoint_current_topic: "uav/waypoints/current"
+  waypoint_params_input_topic: "uav/waypoints/params"
+  waypoint_params_loaded_topic: "uav/waypoints/params_loaded"
   navigator_status_topic: "uav/navigator/status"
   mavros_state_topic: "mavros/state"
   odom_topic: "mavros/local_position/odom"
@@ -212,7 +216,7 @@ experiment:
   output_dir: "/home/groundstation/experiments"
   auto_record: true
   real_path_sample_interval: 0.1
-  max_real_path_points: 500       # real_path 最大点数（FIFO），防止 RViz 卡顿
+  max_real_path_points: 500       # real_path 最大点数（FIFO），防止 RViz 卡顿（≥50）
   metrics_topic: "uav/experiment/metrics"
   status_topic: "uav/navigator/status"
   odom_topic: "mavros/local_position/odom"

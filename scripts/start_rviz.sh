@@ -9,8 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(dirname "$SCRIPT_DIR")"
 
 # Use the same ROS master as the ground station core
-export ROS_MASTER_URI="${ROS_MASTER_URI:-http://192.168.31.30:11311}"
-export ROS_IP="${ROS_IP:-192.168.31.30}"
+export ROS_MASTER_URI="${ROS_MASTER_URI:-http://localhost:11311}"
+export ROS_IP="${ROS_IP:-127.0.0.1}"
 # ROS_HOSTNAME 可选：仅在用户已设置时才导出，避免空字符串导致 ROS 主机名解析失败
 if [ -n "${ROS_HOSTNAME:-}" ]; then
     export ROS_HOSTNAME
@@ -50,14 +50,7 @@ fi
 echo "[✓] roscore is connected"
 echo ""
 
-# Load panel configuration
-rosparam load "$WORKSPACE/src/rviz_waypoint_panel/config/panel_config.yaml"
-echo "[✓] Panel configuration loaded"
-
 # Launch RViz with the integrated panel configuration
-echo ""
+# (rviz_ground_station.launch auto-loads config.yaml + starts RViz)
 echo "Starting RViz..."
-echo "Tip: If the UAV Waypoint Navigation panel is not visible, add it via"
-echo "     Panels -> Add New Panel -> rviz_waypoint_panel -> WaypointPanel"
-echo ""
 roslaunch rviz_waypoint_panel rviz_ground_station.launch

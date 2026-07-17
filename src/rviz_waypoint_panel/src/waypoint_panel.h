@@ -91,22 +91,16 @@ public Q_SLOTS:
     void savePlanWaypoints();
     void publishPlanTask();
 
-    // ===== 导航控制 =====
-    void startNavigation();
-    void emergencyStop();
-    void pauseNavigation();
-    void cancelNavigation();
-    void returnToHome();
-    void resetNavigator();
+    // ===== 飞行控制 =====
+    void startMission();        // ▶ 开始任务：发布航点 + START
+    void hoverInPlace();        // ⏸ 悬停：PAUSE，保持当前位置
+    void landNow();             // 🛬 降落：LAND，立即着陆
+    void returnToHome();        // 🏠 返航：返回起飞点并着陆
+    void resetNavigator();      // 🔄 重置：EMERGENCY/LANDED → IDLE
+    void emergencyStop();       // 🛑 紧急停止
 
-    // ===== 系统控制 =====
-    void launchGroundStation();
-    void killGroundStation();
-    void oneKeyTakeoff();
-    void oneKeyLand();
-    void executeMission();
+    // ===== 系统 =====
     void checkNodeStatus();
-    void updateConnectionStatus();
     void updateAllButtonStates();
 
     // ===== 状态接收 =====
@@ -146,7 +140,6 @@ protected:
     // 辅助
     QString stateToString(uint8_t state);
     QString stateToColor(uint8_t state);
-    void setButtonStyle(QPushButton *btn, const QString &color, bool enabled);
 
     // ROS
     ros::NodeHandle nh_;
@@ -202,8 +195,11 @@ protected:
         std::string config_loaded_topic;
         std::string config_reload_topic;
         std::string waypoint_current_topic;
+        std::string waypoint_params_input_topic;   // 发布 per-waypoint params
+        std::string waypoint_params_loaded_topic;  // 订阅 waypoint_manager 存储的 params
         std::string default_save_path;     // 默认航点保存路径
         std::string default_load_path;     // 默认航点加载路径
+        std::string default_frame_id;      // 默认坐标系（通常为 "map"）
     } config_;
 
     // ===== 数据 =====
@@ -216,6 +212,10 @@ protected:
     std::string mavros_mode_;
     double current_x_, current_y_, current_z_;
     uint8_t confirmed_waypoint_count_;
+
+    // 导航进度追踪（从 NavigatorStatus 同步，用于 marker 颜色编码）
+    uint8_t nav_current_waypoint_idx_;
+    uint8_t nav_total_waypoints_;
 
     // Plan Maker data
     std::vector<geometry_msgs::PoseStamped> plan_maker_points_;
@@ -231,6 +231,9 @@ protected:
 
     // Navigator running flag
     bool navigator_running_;
+
+    // Marker 刷新计数器（替代 static 局部变量，每 N 次 spin 刷新一次 marker）
+    int refresh_counter_;
 
     // ===== 界面控件 =====
     QVBoxLayout *root_layout_;
@@ -258,36 +261,26 @@ protected:
     QLabel *mavros_armed_label_;
     QLabel *mavros_mode_label_;
 
-    // ===== 系统控制按钮 =====
-    QPushButton *launch_gs_button_;
-    QPushButton *kill_gs_button_;
-    QPushButton *one_key_takeoff_button_;
-    QPushButton *one_key_land_button_;
-    QPushButton *execute_mission_button_;
-
-    // ===== 导航控制按钮 =====
-    QPushButton *start_nav_button_;
-    QPushButton *pause_nav_button_;
-    QPushButton *cancel_nav_button_;
-    QPushButton *rth_button_;
-    QPushButton *reset_button_;
-    QPushButton *emergency_button_;
+    // ===== 飞行控制按钮 =====
+    QPushButton *start_mission_button_;   // ▶ 开始任务
+    QPushButton *hover_button_;           // ⏸ 悬停
+    QPushButton *land_button_;            // 🛬 降落
+    QPushButton *rth_button_;             // 🏠 返航
+    QPushButton *reset_button_;           // 🔄 重置
+    QPushButton *emergency_button_;       // 🛑 紧急停止
 
     // ===== 航点规划按钮 =====
+    QPushButton *load_button_;
     QPushButton *connect_plan_button_;
+    QPushButton *save_plan_button_;
     QPushButton *delete_plan_point_button_;
     QPushButton *clear_plan_button_;
-    QPushButton *save_plan_button_;
-    QPushButton *publish_plan_task_button_;
 
-    // ===== 航点操作按钮 =====
+    // ===== 航点列表操作按钮 =====
     QPushButton *delete_button_;
     QPushButton *move_up_button_;
     QPushButton *move_down_button_;
-    QPushButton *save_button_;
-    QPushButton *load_button_;
     QPushButton *clear_button_;
-    QPushButton *publish_button_;
 
     // ===== 日志区域 =====
     QTextEdit *log_text_;

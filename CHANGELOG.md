@@ -4,6 +4,151 @@
 
 ---
 
+## [2.9.0] - 2026-07-17 - 面板 UI 重构、人机交互逻辑优化
+
+### 面板 UI 重构（HMI 优化）
+
+**删除冗余按钮组（4 组 → 合并/删除）：**
+- ❌ **地面站节点** — 删除。用户通过外部脚本管理守护进程，不在 RViz 面板内控制
+- ❌ **任务执行** — 删除。"加载默认任务"合并到航点规划"📂 加载"，"▶ 执行当前航点"合并到飞行控制"▶ 开始任务"
+- ❌ **飞行阶段** — 删除。"🛫 一键起飞/🛬 一键降落/🏠 返航"合并到飞行控制
+- ❌ **安全与重置** — 删除。"🔄 重置/🛑 紧急停止"合并到飞行控制
+
+**新增飞行控制组（语义明确的 6 按钮）：**
+
+| 按钮 | 命令 | 效果 |
+|------|------|------|
+| ▶ 开始任务 | START | 发布航点 → 解锁 → 起飞 → 依次执行 → 降落 |
+| ⏸ 悬停 | PAUSE | 保持当前位置悬停（不降落，可继续） |
+| 🛬 降落 | LAND | 立即结束任务，AUTO.LAND 着陆 |
+| 🏠 返航 | RETURN_TO_HOME | 返回起飞点（TAKEOFF 记录的 Home）着陆 |
+| 🔄 重置 | RESET | EMERGENCY/LANDED → IDLE |
+| 🛑 紧急停止 | EMERGENCY_STOP | 弹窗确认 → AUTO.LAND |
+
+**航点规划组精简：** 按钮顺序改为 📂加载 → 🔗连接 → 💾保存 → 🗑删除 → 🧹清除（按工作流排列），删除冗余的 ▶发布按钮
+
+### 启动脚本优化
+- **所有脚本改用 localhost**：`ROS_MASTER_URI` 默认 `http://localhost:11311`，`ROS_IP` 默认 `127.0.0.1`
+- **start_rviz.sh 修复**：删除指向不存在文件的 `rosparam load panel_config.yaml`
+
+### 代码质量
+- **删除死代码**：`launchGroundStation()`, `killGroundStation()`, `executeMission()`, `oneKeyTakeoff()`, `oneKeyLand()`, `startNavigation()`, `pauseNavigation()`, `cancelNavigation()`, `publishPlanTask()` 共 9 个废弃函数
+- **新增清晰实现**：`startMission()`, `hoverInPlace()`, `landNow()` 带完整 tooltip 说明
+- **updateAllButtonStates() 重写**：适配新按钮集合
+- **checkNodeStatus() 简化**：删除 launch/kill 按钮状态更新
+
+### 文档更新
+- 工作区 README 完全重写（架构图、数据流、话题速查、XML 格式、配置热重载）
+- 四包 README 新增（uav_navigator, uav_waypoint_manager, rviz_waypoint_panel, legacy）
+- 面板 README 更新 UI 布局图和按钮语义表
+
+### 编译验证
+- 全部 3 个活动包通过编译，0 错误 0 警告
+
+---
+
+## [2.8.1] - 2026-07-17 - RViz 点云性能优化
+
+### RViz 配置优化（uav_navigation.rviz）
+
+**点云性能（主因修复）：**
+- **Decay Time: 9999s → 5s** — 点云 5 秒后自动消失，以 10Hz 频率计最多 50 帧点云同时可见。这是解决 RViz 卡顿的**最关键修改**。之前 9999s 意味着点云永不删除，飞行 10 分钟可累积数百万个点，每帧渲染全部走 alpha blending
+- **Queue Size: 10 → 5** — 减少消息缓冲，降低内存峰值
+
+**渲染效率提升：**
+- **DLIO Trajectory Line Style: Billboards → Lines** — 简单线段渲染比 3D 面片快 3-5 倍
+- **移除僵尸 Display：** 删除旧版 `Waypoint Markers`（visualization_marker topic，旧 markWaypoint 已废弃）和 `Planned Trajectory`（uav/trajectory/planned，navigator 已停止发布），减少无效渲染管线
+
+**可视化完善：**
+- **新增方向箭头命名空间：** `uav_plan_maker_arrows` 加入 Plan Maker Points 的 Namespaces 过滤器，确保 yaw 方向箭头正常显示
+
+### 参数参考
+| 参数 | 旧值 | 新值 | 效果 |
+|------|------|------|------|
+| Dense Map Decay Time | 9999s | 5s | 点云自动淘汰，GPU 负载降低 90%+ |
+| Dense Map Queue Size | 10 | 5 | 内存占用减半 |
+| DLIO Trajectory Style | Billboards | Lines | 路径渲染提速 3-5x |
+| Waypoint Markers display | active | removed | 消除僵尸渲染管线 |
+| Planned Trajectory display | active | removed | 消除无效订阅 |
+| Plan Maker arrows namespace | missing | added | 方向箭头正常显示 |
+
+### 编译验证
+- 无需编译（纯配置文件修改）
+
+---
+
+## [2.8.0] - 2026-07-17 - 参数体系统一、硬编码消除、代码质量提升
+
+### 参数体系统一
+- **navigator 参数路径统一：** 飞行参数改为优先从 `flight_defaults/*` 读取（与 waypoint_manager 保持一致），回退到 `flight/*` 兼容旧 config.yaml
+- **重复航点阈值可配置：** `checkDuplicateWaypoints()` 的判定阈值从硬编码 0.01m 改为 `config_.duplicate_threshold`，在 `config.yaml` 的 `validation.duplicate_threshold` 中配置
+- **real_path 最大点数可配置：** `appendRealPath()` 的 FIFO 上限从硬编码 500 改为 `config_.max_real_path_points`（`experiment.max_real_path_points`），默认 500，最小 50
+
+### 关键 Bug 修复
+- **loadConfigFromFile() 竞态条件修复：** 面板自身的 `loadConfig()` 调用从异步 `rosparam load` 之前移到 `QProcess::finished` 回调中，确保读取到的是新参数而非旧值
+- **navigator DEBUG 日志降级：** `ROS_INFO_THROTTLE` → `ROS_DEBUG_THROTTLE`，生产环境不再每 5 秒打印 setpoint 调试信息
+
+### 代码质量
+- **消除 static 局部变量：** `startSpin()` 的 `refresh_counter` 和 `printStatusLine()` 的 `line_count` 改为类成员变量，确保多实例安全和线程安全
+- **旧 Marker 代码安全加固：** `markWaypoint()` 和 `republishMarkers()` 恢复 `lifetime=1.0s`（之前为 0=永久），添加 LEGACY 注释防止误用
+- **Config 结构体完善：** navigator Config 新增 `max_real_path_points`；waypoint_manager Config 新增 `duplicate_threshold`
+
+### 编译验证
+- 全部 3 个活动包通过编译，0 错误 0 警告
+
+---
+
+## [2.7.0] - 2026-07-17 - 可视化方向箭头、前后端对齐、数据链路修复
+
+### 可视化增强
+
+- **恢复方向箭头：** `publishPlanMakerMarkers()` 现在为每个航点发布 **ARROW 标记**（显示 yaw 朝向），用户可以看到每个航点的机头方向
+- **导航进度颜色编码：** 已到达航点=绿色(#4CAF50)、当前目标=亮橙色放大(#FF9800)、待飞行=蓝色(#2196F3)、规划模式=橙色
+- **Marker 自动刷新：** 带 1 秒 lifetime + 面板每 ~300ms 定时刷新；面板崩溃后 marker 自动消失，不留僵尸可视化
+
+### 前后端对齐修复（6 项）
+
+- **修复 params 话题硬编码：** panel 的 `waypoint_params_pub_` 和 `waypoint_params_sub_` 话题从硬编码字符串改为 `config_` 参数（与 waypoint_manager 的 config 保持一致）
+- **修复节点检测硬编码：** `checkNodeStatus()` 中 `"/uav/navigator/status"` 改为配置变量，避免修改 topic 名后按钮全部禁用
+- **紧急原因可见：** NavigatorStatus 的 `error_message` 字段现在显示在面板位置栏（红色加粗），操作员可直观看到紧急原因
+- **Config 新增字段：** `waypoint_params_input_topic` / `waypoint_params_loaded_topic`（panel Config 结构体）
+- **config.yaml 新增：** `panel.waypoint_params_input_topic` / `panel.waypoint_params_loaded_topic` / `paths.default_frame_id`
+- **Logger setpointCallback 空转修复：** 新增 `print_setpoint` 条件判断和 DEBUG 级日志（默认关闭，不消耗带宽）
+
+### 编译验证
+- 全部 4 个包通过编译，0 错误 0 警告
+
+---
+
+## [2.6.0] - 2026-07-17 - 可视化统一与UX重构
+
+### 可视化统一
+
+- **移除双重标记系统：** 打点不再同时发布金色箭头（旧 `markWaypoint`）和橙色球体（`publishPlanMakerMarkers`），统一为橙色球体 + 白色编号，消除 RViz 视觉混乱
+- **Marker 生命周期：** `publishPlanMakerMarkers()` 的 marker 现在有自动过期时间（`lifetime = spin_timer_ms * 2.5`），面板定时器每 3 次 spin 刷新一次；面板崩溃后 marker 在 ~1 秒内自动消失，不留僵尸可视化
+- **clearMarkers() 扩展：** 清除旧命名空间（`uav_waypoint_arrow/number`）同时清除新的 plan_maker 命名空间（`uav_plan_maker_points/numbers`），确保彻底清理
+
+### 按钮布局简化
+
+- **移除旧「航点设置」区域的 💾保存 / 📂加载 / 📤发布 按钮**（与「航点规划」区域功能重复，造成用户困惑）
+- **「航点规划」区域新增 📂加载 按钮**，工作流变为：**加载 → 连接 → 保存 → 发布**（线性、无歧义）
+- **删除未实现的函数声明：** `updateConnectionStatus()` 和 `setButtonStyle()`（仅在头文件中声明，从未实现）
+
+### 配置改进
+
+- **`frame_id` 可配置化：** 全部 25 处硬编码 `"map"` 替换为 `config_.default_frame_id`（navigator / waypoint_manager / panel 三节点的 Config 结构体均已扩展）
+- **`config.yaml` 新增：** `paths.default_frame_id: "map"`，用户可按需修改
+
+### 代码清理
+
+- **navigator：** `handleEmergency()` 中 `static ros::Time last_mode_req` 改为类成员 `last_emergency_mode_req_time_`，消除静态局部变量隐患
+- **panel 头文件：** 移除不再使用的 `save_button_` / `publish_button_` 成员声明
+
+### 编译验证
+- 全部 4 个包通过编译，0 错误 0 警告
+
+---
+
 ## [2.1.0] - 2026-07-17 - 第二轮全面审计与关键修复
 
 ### 审计概览

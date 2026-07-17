@@ -57,6 +57,9 @@ private:
         double print_rate;
     } config_;
 
+    // 行计数器（替代 static 局部变量，用于定期打印表头分隔线）
+    int line_count_;
+
     // 回调
     void odomCallback(const nav_msgs::Odometry::ConstPtr& msg);
     void mavrosStateCallback(const mavros_msgs::State::ConstPtr& msg);
@@ -80,7 +83,7 @@ private:
     void clearScreenSafe();
 };
 
-Logger::Logger(ros::NodeHandle& nh) : nh_(nh), has_odom_(false), has_mavros_state_(false), has_nav_status_(false), has_metrics_(false) {
+Logger::Logger(ros::NodeHandle& nh) : nh_(nh), has_odom_(false), has_mavros_state_(false), has_nav_status_(false), has_metrics_(false), line_count_(0) {
     loadConfig();
 
     odom_sub_ = nh_.subscribe(config_.odom_topic, 10, &Logger::odomCallback, this);
@@ -188,7 +191,10 @@ void Logger::safetyAlertCallback(const std_msgs::String::ConstPtr& msg) {
 }
 
 void Logger::setpointCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
-    // setpoint 日志静默，仅缓存数据
+    if (!config_.print_setpoint) return;
+    // setpoint 日志（按 print_rate 节流，仅调试用）
+    ROS_DEBUG_THROTTLE(5.0, "[Logger] Setpoint: (%.2f, %.2f, %.2f)",
+                       msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
 }
 
 void Logger::metricsCallback(const uav_navigator::ExperimentMetrics::ConstPtr& msg) {
@@ -276,10 +282,9 @@ void Logger::printStatusLine() {
               << armed
               << "\n";
 
-    // 分隔线（每10行打印一次表头提示）
-    static int line_count = 0;
-    line_count++;
-    if (line_count % 20 == 0) {
+    // 分隔线（每20行打印一次表头提示）
+    line_count_++;
+    if (line_count_ % 20 == 0) {
         std::cout << "──────┼────────┼─────┼──────────────────────────┼──────────────────────────┼───────┼──────┼───────\n";
     }
 }

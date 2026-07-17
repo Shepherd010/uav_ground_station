@@ -37,9 +37,10 @@ WaypointPanel::WaypointPanel(QWidget *parent)
     : rviz::Panel(parent), nh_(), max_num_goal_(10), current_waypoint_count_(0),
       current_nav_state_(0), mavros_connected_(false), mavros_armed_(false),
       current_x_(0), current_y_(0), current_z_(0), confirmed_waypoint_count_(0),
+      nav_current_waypoint_idx_(0), nav_total_waypoints_(0),
       plan_maker_phase_(PLANNING), plan_maker_selected_index_(-1),
       plan_maker_dirty_(false), default_hover_time_(5.0), default_speed_(2.0),
-      navigator_running_(false) {
+      navigator_running_(false), refresh_counter_(0) {
 
     loadConfig();
 
@@ -63,10 +64,10 @@ WaypointPanel::WaypointPanel(QWidget *parent)
     nav_command_client_ = nh_.serviceClient<uav_navigator::NavigatorCommand>(config_.nav_command_service);
     config_loaded_pub_ = nh_.advertise<std_msgs::String>(config_.config_loaded_topic, 1, true);
     config_reload_pub_ = nh_.advertise<std_msgs::String>(config_.config_reload_topic, 1, true);
-    waypoint_params_pub_ = nh_.advertise<std_msgs::Float64MultiArray>("uav/waypoints/params", 1, true);
+    waypoint_params_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(config_.waypoint_params_input_topic, 1, true);
     // 从 waypoint_manager 的独立 current 话题接收存储的 params，避免自订阅回环
     waypoint_params_sub_ = nh_.subscribe<std_msgs::Float64MultiArray>(
-        "uav/waypoints/params_loaded", 1, boost::bind(&WaypointPanel::receiveWaypointParams, this, _1));
+        config_.waypoint_params_loaded_topic, 1, boost::bind(&WaypointPanel::receiveWaypointParams, this, _1));
 
     // ========== 主布局 ==========
     root_layout_ = new QVBoxLayout;
@@ -152,101 +153,7 @@ WaypointPanel::WaypointPanel(QWidget *parent)
 
     // ===== 任务控制（按生命周期分组）=====
 
-    // ---- 地面站节点控制 ----
-    QGroupBox *gs_group = new QGroupBox("地面站节点");
-    QHBoxLayout *gs_layout = new QHBoxLayout;
-    gs_layout->setSpacing(4);
-    gs_layout->setContentsMargins(6, 6, 6, 6);
-
-    launch_gs_button_ = new QPushButton("🚀 启动地面站");
-    launch_gs_button_->setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    launch_gs_button_->setToolTip("启动 navigator / safety_monitor / waypoint_manager / logger / experiment_recorder");
-    gs_layout->addWidget(launch_gs_button_);
-
-    kill_gs_button_ = new QPushButton("⏹ 停止地面站");
-    kill_gs_button_->setStyleSheet("background-color: #F44336; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    kill_gs_button_->setToolTip("停止所有地面站核心节点");
-    kill_gs_button_->setEnabled(false);
-    gs_layout->addWidget(kill_gs_button_);
-
-    gs_layout->addStretch();
-    gs_group->setLayout(gs_layout);
-    root_layout_->addWidget(gs_group);
-
-    // ---- 任务执行 ----
-    QGroupBox *mission_group = new QGroupBox("任务执行");
-    QGridLayout *mission_layout = new QGridLayout;
-    mission_layout->setSpacing(4);
-    mission_layout->setContentsMargins(6, 6, 6, 6);
-
-    execute_mission_button_ = new QPushButton("📂 加载默认任务");
-    execute_mission_button_->setStyleSheet("background-color: #9C27B0; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    execute_mission_button_->setToolTip("从 /home/groundstation/waypoints.xml 加载航点并执行。遥控器拨杆可随时接管，优先级最高。");
-    mission_layout->addWidget(execute_mission_button_, 0, 0);
-
-    start_nav_button_ = new QPushButton("▶ 执行当前航点");
-    start_nav_button_->setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    start_nav_button_->setToolTip("发布面板当前航点并开始导航。遥控器拨杆可随时接管，优先级最高。");
-    mission_layout->addWidget(start_nav_button_, 0, 1);
-
-    pause_nav_button_ = new QPushButton("⏸ 暂停任务");
-    pause_nav_button_->setStyleSheet("background-color: #FF9800; color: white; padding: 4px; font-size: 11px;");
-    pause_nav_button_->setToolTip("当前位置悬停。遥控器拨杆可随时接管，优先级最高。");
-    mission_layout->addWidget(pause_nav_button_, 0, 2);
-
-    cancel_nav_button_ = new QPushButton("⏹ 取消任务");
-    cancel_nav_button_->setStyleSheet("background-color: #757575; color: white; padding: 4px; font-size: 11px;");
-    cancel_nav_button_->setToolTip("取消当前任务并降落。遥控器拨杆可随时接管，优先级最高。");
-    mission_layout->addWidget(cancel_nav_button_, 0, 3);
-
-    mission_group->setLayout(mission_layout);
-    root_layout_->addWidget(mission_group);
-
-    // ---- 飞行阶段 ----
-    QGroupBox *flight_group = new QGroupBox("飞行阶段");
-    QGridLayout *flight_layout = new QGridLayout;
-    flight_layout->setSpacing(4);
-    flight_layout->setContentsMargins(6, 6, 6, 6);
-
-    one_key_takeoff_button_ = new QPushButton("🛫 一键起飞");
-    one_key_takeoff_button_->setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    one_key_takeoff_button_->setToolTip("发布当前航点并启动导航序列（解锁→起飞→航点）。遥控器拨杆可随时接管，优先级最高。");
-    flight_layout->addWidget(one_key_takeoff_button_, 0, 0);
-
-    one_key_land_button_ = new QPushButton("🛬 一键降落");
-    one_key_land_button_->setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    one_key_land_button_->setToolTip("立即发送降落命令。遥控器拨杆可随时接管，优先级最高。");
-    flight_layout->addWidget(one_key_land_button_, 0, 1);
-
-    rth_button_ = new QPushButton("🏠 返航降落");
-    rth_button_->setStyleSheet("background-color: #2196F3; color: white; padding: 4px; font-size: 11px;");
-    rth_button_->setToolTip("返回起飞点并降落。遥控器拨杆可随时接管，优先级最高。");
-    flight_layout->addWidget(rth_button_, 0, 2);
-
-    flight_group->setLayout(flight_layout);
-    root_layout_->addWidget(flight_group);
-
-    // ---- 安全与重置 ----
-    QGroupBox *safety_group = new QGroupBox("安全与重置");
-    QHBoxLayout *safety_layout = new QHBoxLayout;
-    safety_layout->setSpacing(4);
-    safety_layout->setContentsMargins(6, 6, 6, 6);
-
-    reset_button_ = new QPushButton("🔄 重置状态机");
-    reset_button_->setStyleSheet("background-color: #607D8B; color: white; padding: 4px; font-size: 11px;");
-    reset_button_->setToolTip("从 EMERGENCY 或 LANDED 状态恢复到 IDLE");
-    safety_layout->addWidget(reset_button_);
-
-    emergency_button_ = new QPushButton("🛑 紧急停止");
-    emergency_button_->setStyleSheet("background-color: #F44336; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    emergency_button_->setToolTip("立即触发紧急停止。RC 遥控器可随时接管，优先级最高。");
-    safety_layout->addWidget(emergency_button_);
-
-    safety_layout->addStretch();
-    safety_group->setLayout(safety_layout);
-    root_layout_->addWidget(safety_group);
-
-    // ===== 航点规划区域（单行紧凑）=====
+    // ===== 航点规划 =====
     QGroupBox *plan_maker_group = new QGroupBox("航点规划");
     QVBoxLayout *plan_maker_layout = new QVBoxLayout;
     plan_maker_layout->setSpacing(4);
@@ -254,23 +161,25 @@ WaypointPanel::WaypointPanel(QWidget *parent)
 
     QHBoxLayout *plan_button_layout = new QHBoxLayout;
     plan_button_layout->setSpacing(4);
+    load_button_ = new QPushButton("📂 加载");
+    load_button_->setToolTip("从 XML 文件加载航点数据");
+    load_button_->setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
     connect_plan_button_ = new QPushButton("🔗 连接");
+    connect_plan_button_->setToolTip("将 ≥2 个航点连接成轨迹线");
     connect_plan_button_->setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
+    save_plan_button_ = new QPushButton("💾 保存");
+    save_plan_button_->setToolTip("发布航点到 waypoint_manager 并等待 navigator 确认");
+    save_plan_button_->setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
+    save_plan_button_->setEnabled(false);
     delete_plan_point_button_ = new QPushButton("🗑 删除");
     delete_plan_point_button_->setStyleSheet("background-color: #F44336; color: white; padding: 4px; font-size: 11px;");
     clear_plan_button_ = new QPushButton("🧹 清除");
     clear_plan_button_->setStyleSheet("background-color: #757575; color: white; padding: 4px; font-size: 11px;");
-    save_plan_button_ = new QPushButton("💾 保存");
-    save_plan_button_->setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    save_plan_button_->setEnabled(false);
-    publish_plan_task_button_ = new QPushButton("▶ 发布");
-    publish_plan_task_button_->setStyleSheet("background-color: #9C27B0; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
-    publish_plan_task_button_->setEnabled(false);
+    plan_button_layout->addWidget(load_button_);
     plan_button_layout->addWidget(connect_plan_button_);
+    plan_button_layout->addWidget(save_plan_button_);
     plan_button_layout->addWidget(delete_plan_point_button_);
     plan_button_layout->addWidget(clear_plan_button_);
-    plan_button_layout->addWidget(save_plan_button_);
-    plan_button_layout->addWidget(publish_plan_task_button_);
     plan_button_layout->addStretch();
     plan_maker_status_label_ = new QLabel("PLANNING | 0");
     plan_maker_status_label_->setStyleSheet("color: #2196F3; font-weight: bold; padding: 2px; font-size: 11px;");
@@ -280,8 +189,8 @@ WaypointPanel::WaypointPanel(QWidget *parent)
     plan_maker_group->setLayout(plan_maker_layout);
     root_layout_->addWidget(plan_maker_group);
 
-    // ===== 航点设置区域 =====
-    QGroupBox *waypoint_group = new QGroupBox("航点设置");
+    // ===== 航点列表 =====
+    QGroupBox *waypoint_group = new QGroupBox("航点列表");
     QVBoxLayout *waypoint_layout = new QVBoxLayout;
     waypoint_layout->setSpacing(4);
     waypoint_layout->setContentsMargins(6, 6, 6, 6);
@@ -305,25 +214,60 @@ WaypointPanel::WaypointPanel(QWidget *parent)
 
     QHBoxLayout *wp_op_layout = new QHBoxLayout;
     wp_op_layout->setSpacing(4);
-    delete_button_ = new QPushButton("删除");
-    move_up_button_ = new QPushButton("上移");
-    move_down_button_ = new QPushButton("下移");
-    clear_button_ = new QPushButton("清除");
-    save_button_ = new QPushButton("💾 保存");
-    load_button_ = new QPushButton("📂 加载");
-    publish_button_ = new QPushButton("📤 发布");
+    delete_button_ = new QPushButton("🗑 删除选中");
+    move_up_button_ = new QPushButton("▲ 上移");
+    move_down_button_ = new QPushButton("▼ 下移");
+    clear_button_ = new QPushButton("🧹 清除全部");
     wp_op_layout->addWidget(delete_button_);
     wp_op_layout->addWidget(move_up_button_);
     wp_op_layout->addWidget(move_down_button_);
     wp_op_layout->addWidget(clear_button_);
-    wp_op_layout->addWidget(save_button_);
-    wp_op_layout->addWidget(load_button_);
-    wp_op_layout->addWidget(publish_button_);
     wp_op_layout->addStretch();
     waypoint_layout->addLayout(wp_op_layout);
 
     waypoint_group->setLayout(waypoint_layout);
     root_layout_->addWidget(waypoint_group);
+
+    // ===== 飞行控制 =====
+    QGroupBox *flight_ctrl_group = new QGroupBox("飞行控制");
+    QVBoxLayout *flight_ctrl_layout = new QVBoxLayout;
+    flight_ctrl_layout->setSpacing(4);
+    flight_ctrl_layout->setContentsMargins(6, 6, 6, 6);
+
+    QHBoxLayout *flight_row1 = new QHBoxLayout;
+    flight_row1->setSpacing(4);
+    start_mission_button_ = new QPushButton("▶ 开始任务");
+    start_mission_button_->setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
+    start_mission_button_->setToolTip("发布航点并启动导航：解锁→起飞→依次执行→降落。遥控器拨杆可随时接管。");
+    hover_button_ = new QPushButton("⏸ 悬停");
+    hover_button_->setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
+    hover_button_->setToolTip("暂停导航，保持当前位置悬停。可随时继续执行剩余航点。");
+    land_button_ = new QPushButton("🛬 降落");
+    land_button_->setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
+    land_button_->setToolTip("立即结束任务并着陆。飞控切换到 AUTO.LAND 模式。");
+    flight_row1->addWidget(start_mission_button_);
+    flight_row1->addWidget(hover_button_);
+    flight_row1->addWidget(land_button_);
+    flight_ctrl_layout->addLayout(flight_row1);
+
+    QHBoxLayout *flight_row2 = new QHBoxLayout;
+    flight_row2->setSpacing(4);
+    rth_button_ = new QPushButton("🏠 返航");
+    rth_button_->setStyleSheet("background-color: #2196F3; color: white; padding: 4px; font-size: 11px;");
+    rth_button_->setToolTip("返回起飞点（TAKEOFF 阶段记录的 Home 位置）并着陆。");
+    reset_button_ = new QPushButton("🔄 重置");
+    reset_button_->setStyleSheet("background-color: #607D8B; color: white; padding: 4px; font-size: 11px;");
+    reset_button_->setToolTip("从 EMERGENCY 或 LANDED 状态恢复到 IDLE，准备下一次任务。");
+    emergency_button_ = new QPushButton("🛑 紧急停止");
+    emergency_button_->setStyleSheet("background-color: #F44336; color: white; font-weight: bold; padding: 4px; font-size: 11px;");
+    emergency_button_->setToolTip("立即触发紧急停止（弹窗确认），飞控切换到 AUTO.LAND。RC 遥控器可随时接管。");
+    flight_row2->addWidget(rth_button_);
+    flight_row2->addWidget(reset_button_);
+    flight_row2->addWidget(emergency_button_);
+    flight_ctrl_layout->addLayout(flight_row2);
+
+    flight_ctrl_group->setLayout(flight_ctrl_layout);
+    root_layout_->addWidget(flight_ctrl_group);
 
     // ===== 操作日志 =====
     QGroupBox *log_group = new QGroupBox("操作日志");
@@ -369,37 +313,27 @@ WaypointPanel::WaypointPanel(QWidget *parent)
     connect(delete_button_, SIGNAL(clicked()), this, SLOT(deleteSelectedWaypoint()));
     connect(move_up_button_, SIGNAL(clicked()), this, SLOT(moveWaypointUp()));
     connect(move_down_button_, SIGNAL(clicked()), this, SLOT(moveWaypointDown()));
-    connect(save_button_, SIGNAL(clicked()), this, SLOT(saveWaypoints()));
-    connect(load_button_, SIGNAL(clicked()), this, SLOT(loadWaypoints()));
     connect(clear_button_, SIGNAL(clicked()), this, SLOT(clearWaypoints()));
-    connect(publish_button_, SIGNAL(clicked()), this, SLOT(publishWaypoints()));
 
-    connect(start_nav_button_, SIGNAL(clicked()), this, SLOT(startNavigation()));
-    connect(pause_nav_button_, SIGNAL(clicked()), this, SLOT(pauseNavigation()));
-    connect(cancel_nav_button_, SIGNAL(clicked()), this, SLOT(cancelNavigation()));
+    connect(start_mission_button_, SIGNAL(clicked()), this, SLOT(startMission()));
+    connect(hover_button_, SIGNAL(clicked()), this, SLOT(hoverInPlace()));
+    connect(land_button_, SIGNAL(clicked()), this, SLOT(landNow()));
     connect(rth_button_, SIGNAL(clicked()), this, SLOT(returnToHome()));
     connect(reset_button_, SIGNAL(clicked()), this, SLOT(resetNavigator()));
     connect(emergency_button_, SIGNAL(clicked()), this, SLOT(emergencyStop()));
 
+    connect(load_button_, SIGNAL(clicked()), this, SLOT(loadWaypoints()));
     connect(connect_plan_button_, SIGNAL(clicked()), this, SLOT(connectPlanTrajectory()));
     connect(delete_plan_point_button_, SIGNAL(clicked()), this, SLOT(deleteSelectedPlanPoint()));
     connect(clear_plan_button_, SIGNAL(clicked()), this, SLOT(clearPlanPoints()));
     connect(save_plan_button_, SIGNAL(clicked()), this, SLOT(savePlanWaypoints()));
-    connect(publish_plan_task_button_, SIGNAL(clicked()), this, SLOT(publishPlanTask()));
 
-    connect(launch_gs_button_, SIGNAL(clicked()), this, SLOT(launchGroundStation()));
-    connect(kill_gs_button_, SIGNAL(clicked()), this, SLOT(killGroundStation()));
-    connect(one_key_takeoff_button_, SIGNAL(clicked()), this, SLOT(oneKeyTakeoff()));
-    connect(one_key_land_button_, SIGNAL(clicked()), this, SLOT(oneKeyLand()));
-    connect(execute_mission_button_, SIGNAL(clicked()), this, SLOT(executeMission()));
     connect(load_config_button_, SIGNAL(clicked()), this, SLOT(loadConfigFromFile()));
 
     connect(spin_timer_, SIGNAL(timeout()), this, SLOT(startSpin()));
     connect(status_check_timer_, SIGNAL(timeout()), this, SLOT(checkNodeStatus()));
 
-    logInfo("RViz 航点面板已初始化");
-    logInfo("使用 2D Nav Goal 工具打点，然后点击\"连接\"→\"保存\"→\"发布\"");
-    logInfo("等待 MAVROS 连接...");
+    logInfo("航点面板已就绪 | 工作流: 打点→连接→保存→开始任务");
     logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
 }
 
@@ -445,10 +379,13 @@ void WaypointPanel::loadConfig() {
     pnh.param<std::string>("topics/config_loaded_topic", config_.config_loaded_topic, "uav/config/loaded");
     pnh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
     pnh.param<std::string>("panel/waypoint_current_topic", config_.waypoint_current_topic, "uav/waypoints/current");
+    pnh.param<std::string>("panel/waypoint_params_input_topic", config_.waypoint_params_input_topic, "uav/waypoints/params");
+    pnh.param<std::string>("panel/waypoint_params_loaded_topic", config_.waypoint_params_loaded_topic, "uav/waypoints/params_loaded");
 
     // 文件路径
     pnh.param<std::string>("paths/default_save", config_.default_save_path, "/home/groundstation/waypoints.xml");
     pnh.param<std::string>("paths/default_load", config_.default_load_path, "/home/groundstation/waypoints.xml");
+    pnh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
 
     // 从全局命名空间读取默认飞行参数
     ros::NodeHandle global_nh;
@@ -541,12 +478,13 @@ void WaypointPanel::receiveGoal(const geometry_msgs::PoseStamped::ConstPtr &pose
             .arg(pose->pose.position.z, 0, 'f', 2));
 
     geometry_msgs::PoseStamped pose_stamped = *pose;
-    pose_stamped.header.frame_id = "map";
+    pose_stamped.header.frame_id = config_.default_frame_id;
     addPlanMakerPoint(pose_stamped);
 
     // 同步添加到航点表格（方便用户编辑 z/yaw/hover/speed）
     addWaypointToTable(pose_stamped.pose, default_hover_time_, default_speed_);
-    markWaypoint(pose_stamped, current_waypoint_count_);
+    // 注：可视化由 addPlanMakerPoint() → publishPlanMakerMarkers() 统一管理
+    // 不再单独调用 markWaypoint()，避免双重视觉标记（金色箭头 + 橙色球体）
 
     setPlanMakerPhase(PLANNING);
     updatePlanMakerStatus();
@@ -563,35 +501,94 @@ void WaypointPanel::publishPlanMakerMarkers() {
 
     // 先发送删除所有旧标记
     visualization_msgs::Marker delete_all;
-    delete_all.header.frame_id = "map";
+    delete_all.header.frame_id = config_.default_frame_id;
     delete_all.header.stamp = ros::Time::now();
     delete_all.action = visualization_msgs::Marker::DELETEALL;
     marker_array.markers.push_back(delete_all);
 
+    // marker 生命周期：面板定时器每 ~300ms 刷新一次，lifetime 设 1 秒
+    // 面板崩溃后 marker 在 1 秒内自动消失，不留僵尸可视化
+    ros::Duration marker_lifetime(1.0);
+
+    // 判断是否处于导航执行中（用于颜色编码）
+    bool is_navigating = (current_nav_state_ == uav_navigator::NavigatorStatus::STATE_TAKEOFF
+                       || current_nav_state_ == uav_navigator::NavigatorStatus::STATE_NAVIGATING
+                       || current_nav_state_ == uav_navigator::NavigatorStatus::STATE_HOVERING
+                       || current_nav_state_ == uav_navigator::NavigatorStatus::STATE_RETURNING);
+
     for (size_t i = 0; i < plan_maker_points_.size(); ++i) {
+        // 颜色编码：导航中按进度着色，规划中统一橙色
+        float r, g, b, a;
+        float sphere_scale = config_.plan_maker_sphere_scale;
+        if (is_navigating && nav_total_waypoints_ > 0) {
+            if (static_cast<uint8_t>(i) < nav_current_waypoint_idx_) {
+                // 已到达：绿色
+                r = 0.30f; g = 0.69f; b = 0.31f; a = 0.7f;  // #4CAF50
+            } else if (static_cast<uint8_t>(i) == nav_current_waypoint_idx_) {
+                // 当前目标：亮橙色 + 放大
+                r = 1.00f; g = 0.60f; b = 0.00f; a = 1.0f;  // #FF9800
+                sphere_scale *= 1.5f;
+            } else {
+                // 待飞行：蓝色
+                r = 0.13f; g = 0.59f; b = 0.95f; a = 0.8f;  // #2196F3
+            }
+        } else {
+            // 规划模式：橙色
+            r = config_.plan_maker_color_r;
+            g = config_.plan_maker_color_g;
+            b = config_.plan_maker_color_b;
+            a = config_.plan_maker_color_a;
+        }
+
+        // 选中高亮
+        if (static_cast<int>(i) == plan_maker_selected_index_) {
+            g = 1.0f;
+            sphere_scale = std::max(sphere_scale, static_cast<float>(config_.plan_maker_sphere_scale * 1.3));
+        }
+
+        // === 位置球（精确标记航点位置）===
         visualization_msgs::Marker sphere;
-        sphere.header.frame_id = "map";
+        sphere.header.frame_id = config_.default_frame_id;
         sphere.header.stamp = ros::Time::now();
         sphere.ns = "uav_plan_maker_points";
         sphere.id = static_cast<int>(i);
         sphere.type = visualization_msgs::Marker::SPHERE;
         sphere.action = visualization_msgs::Marker::ADD;
         sphere.pose = plan_maker_points_[i].pose;
-        sphere.scale.x = config_.plan_maker_sphere_scale;
-        sphere.scale.y = config_.plan_maker_sphere_scale;
-        sphere.scale.z = config_.plan_maker_sphere_scale;
-        sphere.color.r = config_.plan_maker_color_r;
-        sphere.color.g = config_.plan_maker_color_g;
-        sphere.color.b = config_.plan_maker_color_b;
-        sphere.color.a = config_.plan_maker_color_a;
-        if (static_cast<int>(i) == plan_maker_selected_index_) {
-            sphere.color.g = 1.0;  // highlight selected
-        }
+        sphere.scale.x = sphere_scale;
+        sphere.scale.y = sphere_scale;
+        sphere.scale.z = sphere_scale;
+        sphere.color.r = r;
+        sphere.color.g = g;
+        sphere.color.b = b;
+        sphere.color.a = a;
+        sphere.lifetime = marker_lifetime;
         marker_array.markers.push_back(sphere);
 
-        // 数字标签
+        // === 方向箭头（显示 yaw 朝向）===
+        visualization_msgs::Marker arrow;
+        arrow.header.frame_id = config_.default_frame_id;
+        arrow.header.stamp = ros::Time::now();
+        arrow.ns = "uav_plan_maker_arrows";
+        arrow.id = static_cast<int>(i);
+        arrow.type = visualization_msgs::Marker::ARROW;
+        arrow.action = visualization_msgs::Marker::ADD;
+        arrow.pose = plan_maker_points_[i].pose;
+        // 箭头尺寸： shaft=长, head=宽
+        arrow.scale.x = config_.arrow_scale_x;   // 箭头总长
+        arrow.scale.y = config_.arrow_scale_y;   // 箭头宽度
+        arrow.scale.z = config_.arrow_scale_z;   // 箭头高度
+        arrow.color.r = r;
+        arrow.color.g = g;
+        arrow.color.b = b;
+        arrow.color.a = std::min(a + 0.15f, 1.0f);
+        arrow.lifetime = marker_lifetime;
+        marker_array.markers.push_back(arrow);
+
+        // === 数字标签 ===
         visualization_msgs::Marker text;
-        text.header = sphere.header;
+        text.header.frame_id = config_.default_frame_id;
+        text.header.stamp = ros::Time::now();
         text.ns = "uav_plan_maker_numbers";
         text.id = static_cast<int>(i);
         text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
@@ -599,8 +596,11 @@ void WaypointPanel::publishPlanMakerMarkers() {
         text.pose = plan_maker_points_[i].pose;
         text.pose.position.z += config_.number_offset_z;
         text.scale.z = config_.number_scale;
-        text.color.r = text.color.g = text.color.b = 1.0;
-        text.color.a = 1.0;
+        text.color.r = 1.0f;
+        text.color.g = 1.0f;
+        text.color.b = 1.0f;
+        text.color.a = 1.0f;
+        text.lifetime = marker_lifetime;
         text.text = std::to_string(i + 1);
         marker_array.markers.push_back(text);
     }
@@ -610,7 +610,7 @@ void WaypointPanel::publishPlanMakerMarkers() {
 
 void WaypointPanel::publishPlanTrajectory() {
     nav_msgs::Path path;
-    path.header.frame_id = "map";
+    path.header.frame_id = config_.default_frame_id;
     path.header.stamp = ros::Time::now();
 
     for (const auto &pose : plan_maker_points_) {
@@ -678,7 +678,7 @@ void WaypointPanel::clearPlanPoints() {
 
     // 清空轨迹
     nav_msgs::Path empty_path;
-    empty_path.header.frame_id = "map";
+    empty_path.header.frame_id = config_.default_frame_id;
     empty_path.header.stamp = ros::Time::now();
     plan_maker_trajectory_pub_.publish(empty_path);
 
@@ -704,7 +704,7 @@ void WaypointPanel::savePlanWaypoints() {
     }
 
     geometry_msgs::PoseArray waypoints;
-    waypoints.header.frame_id = "map";
+    waypoints.header.frame_id = config_.default_frame_id;
     waypoints.header.stamp = ros::Time::now();
 
     // 从 plan_maker_points_ 读取（唯一数据源），同时从表格读取最新编辑值
@@ -756,27 +756,6 @@ void WaypointPanel::savePlanWaypoints() {
     logInfo(QString("已发布 %1 个航点到 waypoint_manager（含悬停/速度参数），等待 navigator 确认...")
             .arg(confirmed_waypoint_count_));
     // navigator 确认在 receiveNavStatus() 中自动处理，无需单独定时器轮询
-}
-
-void WaypointPanel::publishPlanTask() {
-    if (plan_maker_phase_ != SAVED) {
-        logWarn("请先保存航点再发布任务");
-        return;
-    }
-
-    uav_navigator::NavigatorCommand srv;
-    srv.request.command = "START";
-    if (nav_command_client_.call(srv)) {
-        if (srv.response.success) {
-            setPlanMakerPhase(NAVIGATING);
-            updatePlanMakerStatus();
-            logInfo("任务已发布，开始导航");
-        } else {
-            logError(QString("发布任务失败: %1").arg(QString::fromStdString(srv.response.message)));
-        }
-    } else {
-        logError("调用 navigator command 服务失败");
-    }
 }
 
 void WaypointPanel::setPlanMakerPhase(PlanMakerPhase phase) {
@@ -875,6 +854,12 @@ void WaypointPanel::loadConfigFromFile() {
             }
             config_display_->setPlainText(display_text);
 
+            // 面板自身重新加载配置（更新本地默认值，必须在 rosparam load 完成后）
+            loadConfig();
+            logInfo(QString("  悬停时间默认值: %1 s, 飞行速度默认值: %2 m/s")
+                    .arg(default_hover_time_, 0, 'f', 1)
+                    .arg(default_speed_, 0, 'f', 1));
+
             // 发布加载事件
             publishConfigLoaded(file_path, display_text);
 
@@ -884,7 +869,7 @@ void WaypointPanel::loadConfigFromFile() {
             config_reload_pub_.publish(reload_msg);
             ROS_INFO("[WaypointPanel] Published config reload event to '%s'", config_.config_reload_topic.c_str());
 
-            logInfo("配置加载完成，所有核心节点已同步更新");
+            logInfo("✓ 配置文件已加载并立即生效（面板 + 所有核心节点已同步更新）");
         });
 
     // 超时保护：5 秒后强制终止
@@ -896,14 +881,6 @@ void WaypointPanel::loadConfigFromFile() {
     });
 
     proc->start("rosparam", args);
-
-    // 5) 面板自身重新加载配置（更新本地默认值）
-    loadConfig();
-
-    logInfo("✓ 配置文件已加载并立即生效（面板 + 所有核心节点已同步更新）");
-    logInfo(QString("  悬停时间默认值: %1 s, 飞行速度默认值: %2 m/s")
-            .arg(default_hover_time_, 0, 'f', 1)
-            .arg(default_speed_, 0, 'f', 1));
 }
 
 void WaypointPanel::publishConfigLoaded(const QString &path, const QString &summary) {
@@ -1108,13 +1085,13 @@ void WaypointPanel::clearWaypoints() {
 
     // 清空轨迹
     nav_msgs::Path empty_path;
-    empty_path.header.frame_id = "map";
+    empty_path.header.frame_id = config_.default_frame_id;
     empty_path.header.stamp = ros::Time::now();
     plan_maker_trajectory_pub_.publish(empty_path);
 
     // 发布空 PoseArray 通知 waypoint_manager 和 navigator 清除航点
     geometry_msgs::PoseArray empty_waypoints;
-    empty_waypoints.header.frame_id = "map";
+    empty_waypoints.header.frame_id = config_.default_frame_id;
     empty_waypoints.header.stamp = ros::Time::now();
     waypoint_pub_.publish(empty_waypoints);
 
@@ -1174,7 +1151,7 @@ void WaypointPanel::loadWaypoints() {
             waypoint_speeds_.clear();
             for (const auto& pose : waypoints.poses) {
                 geometry_msgs::PoseStamped ps;
-                ps.header.frame_id = "map";
+                ps.header.frame_id = config_.default_frame_id;
                 ps.header.stamp = ros::Time::now();
                 ps.pose = pose;
                 plan_maker_points_.push_back(ps);
@@ -1222,7 +1199,7 @@ void WaypointPanel::publishWaypoints() {
         return;
     }
     waypoints.header.stamp = ros::Time::now();
-    waypoints.header.frame_id = "map";
+    waypoints.header.frame_id = config_.default_frame_id;
     waypoint_pub_.publish(waypoints);
 
     // 同步发布 per-waypoint 参数
@@ -1243,7 +1220,7 @@ void WaypointPanel::publishWaypoints() {
 geometry_msgs::PoseArray WaypointPanel::readWaypointsFromTable() {
     // 改为从 plan_maker_points_ 读取（唯一数据源）
     geometry_msgs::PoseArray waypoints;
-    waypoints.header.frame_id = "map";
+    waypoints.header.frame_id = config_.default_frame_id;
     waypoints.header.stamp = ros::Time::now();
     for (size_t i = 0; i < plan_maker_points_.size(); ++i) {
         waypoints.poses.push_back(plan_maker_points_[i].pose);
@@ -1294,7 +1271,9 @@ void WaypointPanel::onTableChanged(int row, int column) {
     }
 }
 
-// ========== Marker ==========
+// ========== Marker（LEGACY — 仅保留接口兼容性，新流程使用 publishPlanMakerMarkers()）==========
+// 注意：以下两个函数不再被新代码路径调用，保留仅为向后兼容。
+// 若意外调用 markWaypoint()，其 lifetime=0 会产生僵尸 marker。
 void WaypointPanel::markWaypoint(const geometry_msgs::PoseStamped &pose, int id) {
     if (!ros::ok()) return;
     visualization_msgs::Marker arrow;
@@ -1311,7 +1290,7 @@ void WaypointPanel::markWaypoint(const geometry_msgs::PoseStamped &pose, int id)
     arrow.color.b = config_.color_b;
     arrow.color.a = config_.color_a;
     arrow.id = id;
-    arrow.lifetime = ros::Duration(0);
+    arrow.lifetime = ros::Duration(1.0);  // 修复：防止僵尸 marker（旧代码为 0 = 永久）
     visualization_msgs::Marker number;
     number.header = pose.header;
     number.ns = "uav_waypoint_number";
@@ -1326,23 +1305,37 @@ void WaypointPanel::markWaypoint(const geometry_msgs::PoseStamped &pose, int id)
     number.color.a = config_.color_a;
     number.id = id;
     number.text = std::to_string(id);
-    number.lifetime = ros::Duration(0);
+    number.lifetime = ros::Duration(1.0);  // 修复：防止僵尸 marker
     marker_pub_.publish(arrow);
     marker_pub_.publish(number);
     marker_id_counter_ = std::max(marker_id_counter_, id);
 }
 
 void WaypointPanel::clearMarkers() {
-    // 使用命名空间隔离的 DELETEALL，避免干扰其他插件发布的 marker
+    // 使用命名空间隔离的 DELETEALL，清理所有 marker 命名空间
     visualization_msgs::Marker marker_delete;
-    marker_delete.header.frame_id = "map";
+    marker_delete.header.frame_id = config_.default_frame_id;
     marker_delete.header.stamp = ros::Time::now();
 
+    // 清理旧标记系统（金色箭头+数字）
     marker_delete.ns = "uav_waypoint_arrow";
     marker_delete.action = visualization_msgs::Marker::DELETEALL;
     marker_pub_.publish(marker_delete);
 
     marker_delete.ns = "uav_waypoint_number";
+    marker_delete.action = visualization_msgs::Marker::DELETEALL;
+    marker_pub_.publish(marker_delete);
+
+    // 清理 plan_maker 标记系统（位置球+方向箭头+数字）
+    marker_delete.ns = "uav_plan_maker_points";
+    marker_delete.action = visualization_msgs::Marker::DELETEALL;
+    marker_pub_.publish(marker_delete);
+
+    marker_delete.ns = "uav_plan_maker_arrows";
+    marker_delete.action = visualization_msgs::Marker::DELETEALL;
+    marker_pub_.publish(marker_delete);
+
+    marker_delete.ns = "uav_plan_maker_numbers";
     marker_delete.action = visualization_msgs::Marker::DELETEALL;
     marker_pub_.publish(marker_delete);
 
@@ -1353,15 +1346,16 @@ void WaypointPanel::republishMarkers() {
     geometry_msgs::PoseArray waypoints = readWaypointsFromTable();
     for (size_t i = 0; i < waypoints.poses.size(); ++i) {
         geometry_msgs::PoseStamped ps;
-        ps.header.frame_id = "map";
+        ps.header.frame_id = config_.default_frame_id;
         ps.header.stamp = ros::Time::now();
         ps.pose = waypoints.poses[i];
         markWaypoint(ps, i + 1);
     }
 }
 
-// ========== 导航控制 ==========
-void WaypointPanel::startNavigation() {
+// ========== 飞行控制 ==========
+void WaypointPanel::startMission() {
+    // 发布航点（确保 navigator 收到最新数据）并发送 START 命令
     publishWaypoints();
     if (!nav_command_client_.exists()) {
         logError("导航服务不可用，请确保 navigator 节点已启动");
@@ -1371,31 +1365,34 @@ void WaypointPanel::startNavigation() {
     srv.request.command = "START";
     if (nav_command_client_.call(srv)) {
         if (srv.response.success) {
-            logInfo(QString::fromStdString(srv.response.message));
+            setPlanMakerPhase(NAVIGATING);
+            updatePlanMakerStatus();
+            logInfo("任务已开始 → 解锁 → 起飞 → 执行航点 → 降落");
+            logInfo("提示：RC 遥控器拨杆可随时接管，优先级最高");
         } else {
-            logWarn(QString::fromStdString(srv.response.message));
+            logWarn(QString("START 被拒绝: %1").arg(QString::fromStdString(srv.response.message)));
         }
     } else {
         logError("导航服务调用失败");
     }
 }
 
-void WaypointPanel::pauseNavigation() {
+void WaypointPanel::hoverInPlace() {
     if (!nav_command_client_.exists()) { logError("导航服务不可用"); return; }
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "PAUSE";
     if (nav_command_client_.call(srv)) {
-        logInfo(QString::fromStdString(srv.response.message));
-    } else { logError("暂停失败"); }
+        logInfo("悬停：保持当前位置，可继续执行剩余航点");
+    } else { logError("悬停命令失败"); }
 }
 
-void WaypointPanel::cancelNavigation() {
+void WaypointPanel::landNow() {
     if (!nav_command_client_.exists()) { logError("导航服务不可用"); return; }
     uav_navigator::NavigatorCommand srv;
-    srv.request.command = "CANCEL";
+    srv.request.command = "LAND";
     if (nav_command_client_.call(srv)) {
-        logInfo(QString::fromStdString(srv.response.message));
-    } else { logError("取消失败"); }
+        logInfo("降落：飞控切换到 AUTO.LAND，立即着陆");
+    } else { logError("降落命令失败"); }
 }
 
 void WaypointPanel::returnToHome() {
@@ -1403,8 +1400,8 @@ void WaypointPanel::returnToHome() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "RETURN_TO_HOME";
     if (nav_command_client_.call(srv)) {
-        logInfo(QString::fromStdString(srv.response.message));
-    } else { logError("返航失败"); }
+        logInfo("返航：返回起飞点（TAKEOFF 阶段记录的 Home 位置）并着陆");
+    } else { logError("返航命令失败"); }
 }
 
 void WaypointPanel::resetNavigator() {
@@ -1412,166 +1409,33 @@ void WaypointPanel::resetNavigator() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "RESET";
     if (nav_command_client_.call(srv)) {
-        logInfo(QString::fromStdString(srv.response.message));
+        logInfo("状态机已重置 → IDLE，可开始新任务");
     } else { logError("重置失败"); }
 }
 
 void WaypointPanel::emergencyStop() {
-    int ret = QMessageBox::question(this, "确认", "确定要触发紧急停止吗？", QMessageBox::Yes | QMessageBox::No);
+    int ret = QMessageBox::question(this, "确认紧急停止",
+        "确定要触发紧急停止吗？\n\n飞控将切换到 AUTO.LAND 模式立即着陆。\nRC 遥控器拨杆可随时接管。",
+        QMessageBox::Yes | QMessageBox::No);
     if (ret != QMessageBox::Yes) return;
     if (!nav_command_client_.exists()) { logError("导航服务不可用"); return; }
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "EMERGENCY_STOP";
     if (nav_command_client_.call(srv)) {
-        logError("紧急停止已触发！");
+        logError("⚠ 紧急停止已触发！飞控正在切换到 AUTO.LAND");
     } else { logError("紧急停止调用失败"); }
 }
 
-// ========== 系统控制 ==========
-void WaypointPanel::launchGroundStation() {
-    logInfo("启动地面站核心节点...");
-    if (!ros::master::check()) {
-        logError("roscore 未运行，请先启动 roscore");
-        return;
-    }
-
-    // 使用 QProcess::startDetached 异步启动，不阻塞 UI 线程
-    QString home = QString::fromUtf8(getenv("HOME") ? getenv("HOME") : "/home/groundstation");
-    QString cmd = QString(
-        "bash -lc 'source /opt/ros/noetic/setup.bash && "
-        "source %1/catkin_ws/devel/setup.bash && "
-        "roslaunch uav_navigator ground_station.launch "
-        "> /tmp/ground_station_rviz.log 2>&1 &'").arg(home);
-
-    bool ok = QProcess::startDetached(cmd);
-    if (ok) {
-        logInfo("地面站启动命令已发送");
-        logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
-        launch_gs_button_->setEnabled(false);
-        kill_gs_button_->setEnabled(true);
-    } else {
-        logError("启动地面站失败");
-    }
-}
-
-void WaypointPanel::killGroundStation() {
-    logInfo("正在停止地面站核心节点...");
-    // 使用 QProcess 异步执行，避免阻塞 UI 线程
-    QProcess *proc = new QProcess(this);
-    QObject::connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-        this, [this, proc](int exitCode, QProcess::ExitStatus) {
-            if (exitCode == 0) {
-                logInfo("地面站节点已停止");
-                launch_gs_button_->setEnabled(true);
-                kill_gs_button_->setEnabled(false);
-            } else {
-                logError("停止地面站节点失败 (exit code: " + QString::number(exitCode) + ")");
-            }
-            proc->deleteLater();
-        });
-    proc->start("rosnode", QStringList()
-        << "kill"
-        << "/uav_navigator"
-        << "/uav_safety_monitor"
-        << "/uav_waypoint_manager"
-        << "/uav_logger"
-        << "/uav_experiment_recorder");
-}
-
-void WaypointPanel::oneKeyTakeoff() {
-    logInfo("一键起飞: 启动导航（startNavigation 自动发布航点）");
-    logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
-    // startNavigation() 内部已调用 publishWaypoints()，无需重复
-    startNavigation();
-}
-
-void WaypointPanel::oneKeyLand() {
-    logInfo("一键降落");
-    if (!nav_command_client_.exists()) { logError("导航服务不可用"); return; }
-    uav_navigator::NavigatorCommand srv;
-    srv.request.command = "LAND";
-    if (nav_command_client_.call(srv)) {
-        logInfo(QString::fromStdString(srv.response.message));
-    } else { logError("降落命令失败"); }
-}
-
-void WaypointPanel::executeMission() {
-    logInfo("执行任务: 加载默认航点文件");
-    logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
-
-    // 尝试加载默认文件（路径从配置读取）
-    uav_waypoint_manager::LoadWaypoints srv;
-    srv.request.file_path = config_.default_load_path;
-    if (load_waypoints_client_.call(srv) && srv.response.success) {
-        logInfo(QString::fromStdString(srv.response.message));
-        const auto& waypoints = srv.response.waypoints;
-
-        if (waypoints.poses.empty()) {
-            logError("航点文件为空，无法执行任务");
-            return;
-        }
-
-        // 填充 plan_maker_points_ + 表格 + 可视化
-        clearPlanPoints();
-        plan_maker_points_.clear();
-        waypoint_hover_times_.clear();
-        waypoint_speeds_.clear();
-        for (const auto& pose : waypoints.poses) {
-            geometry_msgs::PoseStamped ps;
-            ps.header.frame_id = "map";
-            ps.header.stamp = ros::Time::now();
-            ps.pose = pose;
-            plan_maker_points_.push_back(ps);
-            waypoint_hover_times_.push_back(default_hover_time_);
-            waypoint_speeds_.push_back(default_speed_);
-        }
-        for (size_t i = 0; i < plan_maker_points_.size(); ++i) {
-            addWaypointToTable(plan_maker_points_[i].pose,
-                               waypoint_hover_times_[i],
-                               waypoint_speeds_[i]);
-        }
-        publishPlanMakerMarkers();
-        if (plan_maker_points_.size() >= 2) {
-            publishPlanTrajectory();
-            setPlanMakerPhase(CONNECTED);
-        }
-        updatePlanMakerStatus();
-        // per-waypoint 参数由 receiveWaypointParams 回调异步更新
-
-        // 安全确认弹窗
-        int ret = QMessageBox::question(this, "确认执行任务",
-            QString("已加载 %1 个航点。\n\n"
-                    "请确认以下步骤已完成：\n"
-                    "  1. RViz 中已显示橙色航点标记 ✓\n"
-                    "  2. 轨迹连线已显示 ✓\n"
-                    "  3. 已检查航点高度和顺序\n\n"
-                    "点击 Yes 继续执行，点击 No 取消。")
-                .arg(plan_maker_points_.size()),
-            QMessageBox::Yes | QMessageBox::No);
-
-        if (ret != QMessageBox::Yes) {
-            logInfo("用户取消任务执行");
-            return;
-        }
-
-        // 用户确认后：保存 → 发布 → START
-        publishWaypoints();
-        startNavigation();
-    } else {
-        logWarn("加载默认航点文件失败，请使用\"📂 加载\"手动选择文件");
-    }
-}
-
+// ========== 系统 ==========
 void WaypointPanel::checkNodeStatus() {
     ros::master::V_TopicInfo topics;
     navigator_running_ = false;
     if (ros::master::getTopics(topics)) {
         for (const auto& t : topics) {
-            if (t.name == "/uav/navigator/status") navigator_running_ = true;
+            std::string expected_topic = "/" + config_.navigator_status_topic;
+            if (t.name == expected_topic) navigator_running_ = true;
         }
     }
-    launch_gs_button_->setEnabled(!navigator_running_);
-    kill_gs_button_->setEnabled(navigator_running_);
     updateAllButtonStates();
 }
 
@@ -1584,34 +1448,26 @@ void WaypointPanel::updateAllButtonStates() {
     bool is_saved = (plan_maker_phase_ == SAVED);
     bool is_navigating = (plan_maker_phase_ == NAVIGATING);
 
-    // 规划按钮
+    // 航点规划按钮
+    load_button_->setEnabled(has_nav && !is_navigating);
     connect_plan_button_->setEnabled(has_nav && has_points && can_connect && is_planning);
+    save_plan_button_->setEnabled(has_nav && is_connected);
     delete_plan_point_button_->setEnabled(has_nav && has_points && !is_navigating);
     clear_plan_button_->setEnabled(has_nav && has_points && !is_navigating);
-    save_plan_button_->setEnabled(has_nav && is_connected);
-    publish_plan_task_button_->setEnabled(has_nav && is_saved);
 
-    // 导航按钮
-    start_nav_button_->setEnabled(has_nav && is_saved);
-    pause_nav_button_->setEnabled(has_nav && is_navigating);
-    cancel_nav_button_->setEnabled(has_nav && (is_navigating || is_connected || is_saved));
+    // 飞行控制按钮
+    start_mission_button_->setEnabled(has_nav && is_saved);
+    hover_button_->setEnabled(has_nav && is_navigating);
+    land_button_->setEnabled(has_nav && (is_navigating || is_connected || is_saved));
     rth_button_->setEnabled(has_nav && is_navigating);
     reset_button_->setEnabled(has_nav);
-    one_key_takeoff_button_->setEnabled(has_nav && is_saved);
-    one_key_land_button_->setEnabled(has_nav && is_navigating);
-    execute_mission_button_->setEnabled(has_nav);
+    emergency_button_->setEnabled(true);  // 始终可用
 
-    // 安全按钮始终可用
-    emergency_button_->setEnabled(true);
-
-    // 航点操作按钮（表格编辑）
+    // 航点列表操作按钮
     delete_button_->setEnabled(has_nav && has_points && !is_navigating);
     move_up_button_->setEnabled(has_nav && has_points && !is_navigating);
     move_down_button_->setEnabled(has_nav && has_points && !is_navigating);
     clear_button_->setEnabled(has_nav && has_points && !is_navigating);
-    save_button_->setEnabled(has_nav && has_points);
-    load_button_->setEnabled(has_nav && !is_navigating);
-    publish_button_->setEnabled(has_nav && has_points && (is_connected || is_saved));
 }
 
 // ========== MAVROS 状态接收 ==========
@@ -1678,6 +1534,10 @@ void WaypointPanel::updateStatusDisplay(const uav_navigator::NavigatorStatus &st
     status_text_->setText(state_str);
     status_text_->setStyleSheet(QString("font-weight: bold; color: %1; font-size: 14px;").arg(color));
 
+    // 同步导航进度（用于 marker 颜色编码）
+    nav_current_waypoint_idx_ = status.current_waypoint_index;
+    nav_total_waypoints_ = status.total_waypoints;
+
     // 航点显示：无航点时显示 --/--
     if (status.total_waypoints == 0) {
         wp_progress_label_->setText("航点: --/--");
@@ -1701,12 +1561,19 @@ void WaypointPanel::updateStatusDisplay(const uav_navigator::NavigatorStatus &st
             .arg(status.target_z, 0, 'f', 2);
     }
 
-    position_label_->setText(
-        QString("位置: %1, %2, %3 | 目标: %4")
+    // 位置 + 错误信息
+    QString pos_text = QString("位置: %1, %2, %3 | 目标: %4")
             .arg(status.current_x, 0, 'f', 2)
             .arg(status.current_y, 0, 'f', 2)
             .arg(status.current_z, 0, 'f', 2)
-            .arg(target_text));
+            .arg(target_text);
+    if (!status.error_message.empty()) {
+        pos_text += QString(" | ⚠ %1").arg(QString::fromStdString(status.error_message));
+        position_label_->setStyleSheet("color: #F44336; font-weight: bold; font-size: 11px;");
+    } else {
+        position_label_->setStyleSheet("color: #666; font-size: 11px;");
+    }
+    position_label_->setText(pos_text);
 
     // 航点保存确认：如果正在等待确认且 total_waypoints 匹配
     if (confirmed_waypoint_count_ > 0 && plan_maker_phase_ != SAVED && plan_maker_phase_ != NAVIGATING) {
@@ -1723,6 +1590,14 @@ void WaypointPanel::updateStatusDisplay(const uav_navigator::NavigatorStatus &st
 void WaypointPanel::startSpin() {
     if (ros::ok()) {
         ros::spinOnce();
+    }
+
+    // 周期性刷新 plan_maker marker（因为 marker 有 lifetime，需持续重发）
+    // 每 3 次 spin 刷新一次，减少不必要的发布
+    refresh_counter_++;
+    if (refresh_counter_ >= 3 && !plan_maker_points_.empty()) {
+        publishPlanMakerMarkers();
+        refresh_counter_ = 0;
     }
 }
 

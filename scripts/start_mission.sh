@@ -11,8 +11,8 @@ WORKSPACE="$(dirname "$SCRIPT_DIR")"
 WAYPOINT_FILE="${1:-/home/groundstation/waypoints.xml}"
 
 # Use the same ROS master as the ground station core
-export ROS_MASTER_URI="${ROS_MASTER_URI:-http://192.168.31.116:11311}"
-export ROS_IP="${ROS_IP:-192.168.31.116}"
+export ROS_MASTER_URI="${ROS_MASTER_URI:-http://localhost:11311}"
+export ROS_IP="${ROS_IP:-127.0.0.1}"
 # ROS_HOSTNAME 可选：仅在用户已设置时才导出，避免空字符串导致 ROS 主机名解析失败
 if [ -n "${ROS_HOSTNAME:-}" ]; then
     export ROS_HOSTNAME

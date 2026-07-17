@@ -97,9 +97,11 @@ private:
         std::string clear_service;
         std::string default_save_path;
         std::string default_load_path;
+        std::string default_frame_id;
         double min_waypoint_spacing;
         double max_height;
         double min_height;
+        double duplicate_threshold;  // 重复航点判定阈值（米），默认 0.01
         double publish_rate;
     } config_;
 
@@ -161,10 +163,12 @@ void WaypointManager::loadConfig() {
 
     global_nh.param<std::string>("paths/default_save", config_.default_save_path, "/home/groundstation/waypoints.xml");
     global_nh.param<std::string>("paths/default_load", config_.default_load_path, "/home/groundstation/waypoints.xml");
+    global_nh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
 
     global_nh.param<double>("validation/min_waypoint_spacing", config_.min_waypoint_spacing, 0.3);
     global_nh.param<double>("validation/max_height", config_.max_height, 50.0);
     global_nh.param<double>("validation/min_height", config_.min_height, 0.5);
+    global_nh.param<double>("validation/duplicate_threshold", config_.duplicate_threshold, 0.01);
     global_nh.param<double>("publish_rate", config_.publish_rate, 1.0);
 
     // 从全局命名空间读取默认飞行参数（用于 per-waypoint 回退）
@@ -349,7 +353,7 @@ bool WaypointManager::clearWaypointsCallback(uav_waypoint_manager::ClearWaypoint
     has_waypoints_ = false;
 
     geometry_msgs::PoseArray empty_msg;
-    empty_msg.header.frame_id = "map";
+    empty_msg.header.frame_id = config_.default_frame_id;
     waypoints_pub_.publish(empty_msg);
     publishWaypointParams();
 
@@ -454,7 +458,7 @@ bool WaypointManager::loadFromXml(const std::string& file_path) {
         // 临时容器，成功后再替换
         geometry_msgs::PoseArray temp_waypoints;
         std::vector<WaypointParams> temp_params;
-        temp_waypoints.header.frame_id = "map";
+        temp_waypoints.header.frame_id = config_.default_frame_id;
 
         size_t pos = 0;
         while ((pos = content.find("<waypoint id=\"", pos)) != std::string::npos) {
@@ -648,7 +652,7 @@ bool WaypointManager::validateWaypoints(std::string& error_msg) {
 bool WaypointManager::checkDuplicateWaypoints(std::string& error_msg) {
     for (size_t i = 0; i < waypoints_.poses.size(); ++i) {
         for (size_t j = i + 1; j < waypoints_.poses.size(); ++j) {
-            if (distance3D(waypoints_.poses[i].position, waypoints_.poses[j].position) < 0.01) {
+            if (distance3D(waypoints_.poses[i].position, waypoints_.poses[j].position) < config_.duplicate_threshold) {
                 error_msg = "Duplicate waypoints: " + std::to_string(i + 1) + " and " + std::to_string(j + 1);
                 ROS_WARN("[WaypointManager] %s", error_msg.c_str());
                 // 重复航点仅警告，不阻止（用户可能有意识地在同一位置设置航点做hover）

@@ -143,6 +143,7 @@ private:
     int setpoint_pub_count_;
     ros::Time setpoint_rate_check_start_;
     ros::Time mode_loss_time_;
+    ros::Time last_emergency_mode_req_time_;  // 紧急状态下模式请求限流
 
     // ========== 配置参数 ==========
     struct Config {
@@ -194,7 +195,9 @@ private:
         std::string real_path_topic;
         std::string metrics_topic;
         std::string config_reload_topic;
+        std::string default_frame_id;
         double real_path_sample_interval;
+        int max_real_path_points;    // real_path 最大点数（FIFO），防止 RViz 卡顿
     } config_;
 
     // ========== 方法 ==========
@@ -264,7 +267,7 @@ Navigator::Navigator(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     initROS();
 
     // 初始化setpoint：默认悬停在起飞高度，避免地面或无效位置导致异常
-    current_setpoint_.header.frame_id = "map";
+    current_setpoint_.header.frame_id = config_.default_frame_id;
     current_setpoint_.pose.position.x = 0.0;
     current_setpoint_.pose.position.y = 0.0;
     current_setpoint_.pose.position.z = config_.takeoff_height;
@@ -274,14 +277,15 @@ Navigator::Navigator(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     current_setpoint_.pose.orientation.w = 1.0;
 
     // 初始化轨迹
-    planned_path_.header.frame_id = "map";
-    real_path_.header.frame_id = "map";
+    planned_path_.header.frame_id = config_.default_frame_id;
+    real_path_.header.frame_id = config_.default_frame_id;
 
     last_setpoint_pub_time_ = ros::Time::now();
     setpoint_rate_check_start_ = ros::Time::now();
     last_real_path_sample_time_ = ros::Time(0);
     last_odom_time_ = ros::Time(0);
     mode_loss_time_ = ros::Time(0);
+    last_emergency_mode_req_time_ = ros::Time(0);
 
     ROS_INFO("[Navigator] Initialization complete, current state: %s", stateToString(nav_state_));
 }
@@ -308,13 +312,23 @@ void Navigator::loadConfig() {
     global_nh.param<std::string>("topics/navigator_command", config_.navigator_command_service, "uav/navigator/command");
     global_nh.param<std::string>("topics/safety_alert", config_.safety_alert_topic, "uav/safety/alert");
 
-    // 飞行参数（兼容 flight 和 flight_defaults 两节）
-    global_nh.param<double>("flight/takeoff_height", config_.takeoff_height, 1.0);
-    global_nh.param<double>("flight/hover_duration", config_.hover_duration, 2.0);
-    global_nh.param<double>("flight/setpoint_rate", config_.setpoint_rate, 20.0);
-    global_nh.param<int>("flight/offboard_pre_pub_count", config_.offboard_pre_pub_count, 100);
-    global_nh.param<double>("flight/landing_height_threshold", config_.landing_height_threshold, 0.15);
-    global_nh.param<double>("flight/takeoff_timeout", config_.takeoff_timeout, 20.0);
+    // 飞行参数：优先从 flight_defaults 读取（与 waypoint_manager 保持一致），
+    // 回退到 flight（兼容旧版 config.yaml）
+    global_nh.param<double>("flight_defaults/takeoff_height", config_.takeoff_height, 1.0);
+    global_nh.param<double>("flight_defaults/hover_duration", config_.hover_duration, 2.0);
+    global_nh.param<double>("flight_defaults/setpoint_rate", config_.setpoint_rate, 20.0);
+    global_nh.param<int>("flight_defaults/offboard_pre_pub_count", config_.offboard_pre_pub_count, 100);
+    global_nh.param<double>("flight_defaults/landing_height_threshold", config_.landing_height_threshold, 0.15);
+    global_nh.param<double>("flight_defaults/takeoff_timeout", config_.takeoff_timeout, 20.0);
+    // 向后兼容：如果 flight_defaults 未设置，回退到 flight 节
+    if (!global_nh.hasParam("flight_defaults/takeoff_height")) {
+        global_nh.param<double>("flight/takeoff_height", config_.takeoff_height, 1.0);
+        global_nh.param<double>("flight/hover_duration", config_.hover_duration, 2.0);
+        global_nh.param<double>("flight/setpoint_rate", config_.setpoint_rate, 20.0);
+        global_nh.param<int>("flight/offboard_pre_pub_count", config_.offboard_pre_pub_count, 100);
+        global_nh.param<double>("flight/landing_height_threshold", config_.landing_height_threshold, 0.15);
+        global_nh.param<double>("flight/takeoff_timeout", config_.takeoff_timeout, 20.0);
+    }
 
     // 航点参数
     global_nh.param<double>("waypoint/reach_threshold_xy", config_.reach_threshold_xy, 0.15);
@@ -360,6 +374,8 @@ void Navigator::loadConfig() {
     global_nh.param<std::string>("topics/metrics", config_.metrics_topic, "uav/experiment/metrics");
     global_nh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
     global_nh.param<double>("experiment/real_path_sample_interval", config_.real_path_sample_interval, 0.1);
+    global_nh.param<int>("experiment/max_real_path_points", config_.max_real_path_points, 500);
+    global_nh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
 
     ROS_INFO("[Navigator] Configuration loaded:");
     ROS_INFO("  - takeoff height: %.2f m", config_.takeoff_height);
@@ -933,12 +949,11 @@ void Navigator::handleEmergency() {
     }
 
     // 限制模式请求频率（每秒最多一次）
-    static ros::Time last_mode_req = ros::Time(0);
-    if ((ros::Time::now() - last_mode_req).toSec() > 1.0) {
+    if ((ros::Time::now() - last_emergency_mode_req_time_).toSec() > 1.0) {
         if (!requestMode("AUTO.LAND")) {
             ROS_WARN_THROTTLE(5.0, "[Navigator] Failed to request AUTO.LAND in emergency");
         }
-        last_mode_req = ros::Time::now();
+        last_emergency_mode_req_time_ = ros::Time::now();
     }
 
     // 尝试上锁（如果已降落）
@@ -1022,8 +1037,8 @@ void Navigator::setpointTimerCallback(const ros::TimerEvent& event) {
             should_publish = true;
         }
 
-        // 调试：使用 ROS_INFO_THROTTLE 替代 static 局部变量，线程安全
-        ROS_INFO_THROTTLE(5.0, "[Navigator][DEBUG] state=%s setpoint=(%.2f, %.2f, %.2f)",
+        // 调试日志（默认关闭，需配置 rosconsole 级别为 DEBUG 才输出）
+        ROS_DEBUG_THROTTLE(5.0, "[Navigator] state=%s setpoint=(%.2f, %.2f, %.2f)",
                  stateToString(nav_state_),
                  current_setpoint_.pose.position.x,
                  current_setpoint_.pose.position.y,
@@ -1157,13 +1172,13 @@ void Navigator::publishStatus() {
 
 void Navigator::setSetpoint(const geometry_msgs::Pose& pose) {
     current_setpoint_.header.stamp = ros::Time::now();
-    current_setpoint_.header.frame_id = "map";
+    current_setpoint_.header.frame_id = config_.default_frame_id;
     current_setpoint_.pose = pose;
 }
 
 void Navigator::setSetpointXYZ(double x, double y, double z) {
     current_setpoint_.header.stamp = ros::Time::now();
-    current_setpoint_.header.frame_id = "map";
+    current_setpoint_.header.frame_id = config_.default_frame_id;
     current_setpoint_.pose.position.x = x;
     current_setpoint_.pose.position.y = y;
     current_setpoint_.pose.position.z = z;
@@ -1175,7 +1190,7 @@ void Navigator::setSetpointXYZ(double x, double y, double z) {
 
 void Navigator::updateSetpointFromCurrentPosition() {
     current_setpoint_.header.stamp = ros::Time::now();
-    current_setpoint_.header.frame_id = "map";
+    current_setpoint_.header.frame_id = config_.default_frame_id;
     if (has_odom_) {
         current_setpoint_.pose = current_odom_.pose.pose;
     } else {
@@ -1276,7 +1291,7 @@ namespace uav_navigator {
 void Navigator::buildPlannedPath() {
     planned_path_.poses.clear();
     planned_path_.header.stamp = ros::Time::now();
-    planned_path_.header.frame_id = "map";
+    planned_path_.header.frame_id = config_.default_frame_id;
 
     if (!has_waypoints_ || waypoints_.poses.empty()) return;
 
@@ -1294,7 +1309,7 @@ void Navigator::appendRealPath() {
     if (!has_odom_) return;
 
     real_path_.header.stamp = ros::Time::now();
-    real_path_.header.frame_id = "map";
+    real_path_.header.frame_id = config_.default_frame_id;
 
     geometry_msgs::PoseStamped ps;
     ps.header = real_path_.header;
@@ -1303,8 +1318,8 @@ void Navigator::appendRealPath() {
 
     // 限制最大点数，FIFO 淘汰旧数据，防止 RViz 长期运行后卡顿
     // 以 10Hz 采样率计，500 点 ≈ 50 秒可见历史，足够调试
-    const size_t MAX_REAL_PATH_POINTS = 500;
-    while (real_path_.poses.size() > MAX_REAL_PATH_POINTS) {
+    const size_t max_points = static_cast<size_t>(std::max(config_.max_real_path_points, 50));
+    while (real_path_.poses.size() > max_points) {
         real_path_.poses.erase(real_path_.poses.begin());
     }
 }
@@ -1338,7 +1353,7 @@ double Navigator::computePlanDeviation() {
 void Navigator::publishMetrics() {
     uav_navigator::ExperimentMetrics msg;
     msg.header.stamp = ros::Time::now();
-    msg.header.frame_id = "map";
+    msg.header.frame_id = config_.default_frame_id;
 
     msg.nav_state = static_cast<uint8_t>(nav_state_);
     msg.current_waypoint_index = 0;
