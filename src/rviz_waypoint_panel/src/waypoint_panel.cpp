@@ -626,15 +626,17 @@ void WaypointPanel::deleteSelectedPlanPoint() {
         idx = static_cast<int>(plan_maker_points_.size()) - 1;
     }
 
-    plan_maker_points_.erase(plan_maker_points_.begin() + idx);
-    if (plan_maker_selected_index_ >= static_cast<int>(plan_maker_points_.size())) {
-        plan_maker_selected_index_ = static_cast<int>(plan_maker_points_.size()) - 1;
-    }
-
-    // 同步删除表格中对应行
+    // 不直接删除 plan_maker_points_ —— deleteSelectedWaypoint() 统一管理数据结构的删除
+    // 避免 double-erase bug
     if (idx < current_waypoint_count_) {
         waypoint_table_->setCurrentCell(idx, 0);
         deleteSelectedWaypoint();
+    } else {
+        // 表格中没有对应的行，直接从数据结构中删除
+        plan_maker_points_.erase(plan_maker_points_.begin() + idx);
+        if (plan_maker_selected_index_ >= static_cast<int>(plan_maker_points_.size())) {
+            plan_maker_selected_index_ = static_cast<int>(plan_maker_points_.size()) - 1;
+        }
     }
 
     publishPlanMakerMarkers();
@@ -1010,6 +1012,12 @@ void WaypointPanel::moveWaypointUp() {
     }
     waypoint_table_->blockSignals(false);
     waypoint_table_->selectRow(row - 1);
+    // 同步 plan_maker_selected_index_
+    if (plan_maker_selected_index_ == row) {
+        plan_maker_selected_index_ = row - 1;
+    } else if (plan_maker_selected_index_ == row - 1) {
+        plan_maker_selected_index_ = row;
+    }
     publishPlanMakerMarkers();
     if (plan_maker_phase_ == CONNECTED || plan_maker_phase_ == SAVED) {
         publishPlanTrajectory();
@@ -1037,6 +1045,12 @@ void WaypointPanel::moveWaypointDown() {
     }
     waypoint_table_->blockSignals(false);
     waypoint_table_->selectRow(row + 1);
+    // 同步 plan_maker_selected_index_
+    if (plan_maker_selected_index_ == row) {
+        plan_maker_selected_index_ = row + 1;
+    } else if (plan_maker_selected_index_ == row + 1) {
+        plan_maker_selected_index_ = row;
+    }
     publishPlanMakerMarkers();
     if (plan_maker_phase_ == CONNECTED || plan_maker_phase_ == SAVED) {
         publishPlanTrajectory();
@@ -1067,6 +1081,17 @@ void WaypointPanel::clearWaypoints() {
     empty_path.header.frame_id = "map";
     empty_path.header.stamp = ros::Time::now();
     plan_maker_trajectory_pub_.publish(empty_path);
+
+    // 发布空 PoseArray 通知 waypoint_manager 和 navigator 清除航点
+    geometry_msgs::PoseArray empty_waypoints;
+    empty_waypoints.header.frame_id = "map";
+    empty_waypoints.header.stamp = ros::Time::now();
+    waypoint_pub_.publish(empty_waypoints);
+
+    // 发布空参数数组
+    std_msgs::Float64MultiArray empty_params;
+    waypoint_params_pub_.publish(empty_params);
+    confirmed_waypoint_count_ = 0;
 
     setPlanMakerPhase(PLANNING);
     updatePlanMakerStatus();
@@ -1282,9 +1307,19 @@ void WaypointPanel::markWaypoint(const geometry_msgs::PoseStamped &pose, int id)
 }
 
 void WaypointPanel::clearMarkers() {
+    // 使用命名空间隔离的 DELETEALL，避免干扰其他插件发布的 marker
     visualization_msgs::Marker marker_delete;
+    marker_delete.header.frame_id = "map";
+    marker_delete.header.stamp = ros::Time::now();
+
+    marker_delete.ns = "uav_waypoint_arrow";
     marker_delete.action = visualization_msgs::Marker::DELETEALL;
     marker_pub_.publish(marker_delete);
+
+    marker_delete.ns = "uav_waypoint_number";
+    marker_delete.action = visualization_msgs::Marker::DELETEALL;
+    marker_pub_.publish(marker_delete);
+
     marker_id_counter_ = 0;
 }
 

@@ -445,9 +445,22 @@ void Navigator::localPosCallback(const nav_msgs::Odometry::ConstPtr& msg) {
 }
 
 void Navigator::waypointsCallback(const geometry_msgs::PoseArray::ConstPtr& msg) {
+    // 飞行中收到新航点时不重置索引，避免无人机突然飞回第一个航点
+    bool is_flying = (nav_state_ == State::TAKEOFF || nav_state_ == State::NAVIGATING ||
+                      nav_state_ == State::HOVERING);
     waypoints_ = *msg;
     has_waypoints_ = true;
-    current_waypoint_idx_ = 0;
+    if (!is_flying) {
+        current_waypoint_idx_ = 0;
+    } else {
+        // 飞行中收到新航点：保持当前索引，但限制不超过新航点数量
+        if (current_waypoint_idx_ >= waypoints_.poses.size()) {
+            current_waypoint_idx_ = waypoints_.poses.size() > 0 ? waypoints_.poses.size() - 1 : 0;
+        }
+        ROS_WARN("[Navigator] Waypoints updated mid-flight, keeping current index %zu (new total: %zu)",
+                 current_waypoint_idx_, waypoints_.poses.size());
+        return;
+    }
     ROS_INFO("[Navigator] Received %zu waypoints", waypoints_.poses.size());
 }
 
@@ -802,9 +815,10 @@ void Navigator::handleTakeoff() {
         }
     }
 
-    // OFFBOARD模式请求超时检查（从第一次请求开始计时）
-    if ((ros::Time::now() - last_mode_request_time_).toSec() > config_.takeoff_timeout) {
-        ROS_ERROR("[Navigator] Takeoff timeout (OFFBOARD request failed or takeoff height not reached), starting landing");
+    // OFFBOARD模式请求超时检查（从进入 TAKEOFF 状态开始计时，非每次重试刷新）
+    if ((ros::Time::now() - state_enter_time_).toSec() > config_.takeoff_timeout) {
+        ROS_ERROR("[Navigator] Takeoff timeout (%.1f s overall since entering TAKEOFF), starting landing",
+                  config_.takeoff_timeout);
         transitionState(State::LANDING);
     }
 }
@@ -942,9 +956,7 @@ void Navigator::handleEmergency() {
 }
 
 void Navigator::handleReturning() {
-    // 返航：发布home位置setpoint
-    setpoint_pub_.publish(current_setpoint_);
-
+    // setpoint 由 setpointTimerCallback 统一发布（20Hz），此处不重复发布，仅做位置判断和超时检测
     // 检查是否到达home位置
     if (has_odom_ && has_home_position_) {
         double dx = fabs(current_odom_.pose.pose.position.x - home_position_.position.x);

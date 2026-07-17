@@ -10,12 +10,46 @@
 #include <cmath>
 #include <algorithm>
 #include <ctime>
+#include <cstdlib>       // realpath()
+#include <climits>       // PATH_MAX
+#include <unistd.h>      // readlink (for /proc/self/exe fallback)
 
 #include "uav_waypoint_manager/LoadWaypoints.h"
 #include "uav_waypoint_manager/SaveWaypoints.h"
 #include "uav_waypoint_manager/ClearWaypoints.h"
 
 namespace uav_waypoint_manager {
+
+// 路径安全检查：确保解析后的路径在允许的基础目录内
+static bool isPathSafe(const std::string& path, const std::string& allowed_base) {
+    // 不允许空路径
+    if (path.empty()) return false;
+    // 拒绝包含 ".." 的相对路径遍历
+    if (path.find("..") != std::string::npos) {
+        ROS_ERROR("[WaypointManager] Path traversal rejected: %s", path.c_str());
+        return false;
+    }
+    // 使用 realpath 解析绝对路径
+    char resolved[PATH_MAX];
+    if (realpath(path.c_str(), resolved) == nullptr) {
+        // 文件不存在时 realpath 返回 null，允许创建新文件（仅对写操作）
+        // 但需确保父目录在允许范围内
+        std::string parent = path.substr(0, path.find_last_of('/'));
+        if (parent.empty() || parent == path) return true;  // 当前目录，允许
+        if (realpath(parent.c_str(), resolved) == nullptr) {
+            ROS_ERROR("[WaypointManager] Cannot resolve parent directory: %s", parent.c_str());
+            return false;
+        }
+    }
+    std::string resolved_str(resolved);
+    // 检查是否在允许的目录范围内
+    if (resolved_str.find(allowed_base) != 0) {
+        ROS_ERROR("[WaypointManager] Access denied: %s (resolved: %s) outside allowed base: %s",
+                  path.c_str(), resolved_str.c_str(), allowed_base.c_str());
+        return false;
+    }
+    return true;
+}
 
 class WaypointManager {
 public:
@@ -226,6 +260,15 @@ void WaypointManager::waypointParamsCallback(const std_msgs::Float64MultiArray::
 bool WaypointManager::loadWaypointsCallback(uav_waypoint_manager::LoadWaypoints::Request& req,
                                             uav_waypoint_manager::LoadWaypoints::Response& res) {
     std::string file_path = req.file_path.empty() ? config_.default_load_path : req.file_path;
+
+    // 路径遍历保护
+    if (!isPathSafe(file_path, "/home/groundstation")) {
+        res.success = false;
+        res.message = "Access denied: path traversal detected or path outside allowed directory";
+        res.waypoint_count = 0;
+        return true;
+    }
+
     ROS_INFO("[WaypointManager] Received load waypoints request: %s", file_path.c_str());
 
     try {
@@ -271,6 +314,14 @@ bool WaypointManager::saveWaypointsCallback(uav_waypoint_manager::SaveWaypoints:
     }
 
     std::string file_path = req.file_path.empty() ? config_.default_save_path : req.file_path;
+
+    // 路径遍历保护
+    if (!isPathSafe(file_path, "/home/groundstation")) {
+        res.success = false;
+        res.message = "Access denied: path traversal detected or path outside allowed directory";
+        return true;
+    }
+
     ROS_INFO("[WaypointManager] Received save waypoints request: %s", file_path.c_str());
 
     try {

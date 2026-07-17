@@ -4,83 +4,191 @@
 
 ---
 
+## [2.1.0] - 2026-07-17 - 第二轮全面审计与关键修复
+
+### 审计概览
+
+通过两次独立代码审查（前端 RViz 插件 + 后端导航节点），共发现 **50 个问题**：
+- **前端审计** (rviz_waypoint_panel + navi_multi_goals_pub_rviz_plugin)：27 个问题（5 CRITICAL / 7 HIGH / 15 MEDIUM/LOW）
+- **后端审计** (navigator + safety_monitor + waypoint_manager + logger + experiment_recorder)：23 个问题（5 CRITICAL / 11 IMPORTANT / 7 SUGGESTION）
+
+### Phase 8: 恢复并优化 rviz_navi_multi_goals_pub_plugin
+
+- **恢复文件：** `src/rviz_navi_multi_goals_pub_plugin/`（从 `/home/groundstation/catkin_ws` 复制并优化）
+- **修改原因：** 用户依赖此插件进行可视化选点导航；之前被错误删除
+- **优化内容：**
+  - 修复 `startSpin()` 声明为 `static` 导致 Qt 信号槽不可靠（改为非静态成员函数）
+  - 修复 `setBackgroundColor()` 使用已废弃的 Qt5 API（改为 `QBrush` 方式）
+  - 移除 `ros::Duration(0.5).sleep()` 阻塞 UI 线程
+  - Marker 使用独立命名空间（`multi_navi_arrow` / `multi_navi_number`），DELETEALL 不干扰其他插件
+  - 所有参数通过 ROS 参数服务器加载，新增 `config/plugin_config.yaml`
+  - 集成 waypoint_manager 服务：新增「💾 保存XML」「📂 加载XML」「📤 发布至导航器」按钮
+  - `loadFromXml()` 直接从服务响应获取航点数据并填充表格和可视化（修复数据丢弃问题）
+  - 新增状态标签显示航点数/模式/索引
+  - 移除阻塞式 `ros::Duration(0.5).sleep()` 和 `ros::Duration(0.1).sleep()`
+  - 更新 CMakeLists.txt（现代 catkin 依赖）、package.xml（format=3）、plugin_description.xml
+  - 清理非源码文件（develop.html/md, README.html/md, images/, .git）
+- **影响范围：** navi_multi_goals_pub_rviz_plugin（新增为第 4 个编译包）
+- **验证方法：** `catkin build` 四包全部通过编译（0 错误 0 警告）
+
+### Phase 9: 关键修复 — 后端导航核心
+
+#### navigator.cpp 修复
+
+- **【CRITICAL】修复 `waypointsCallback` 无条件重置航点索引：**
+  - 问题：飞行中收到新航点时 `current_waypoint_idx_` 被重置为 0，无人机会突然飞回第一个航点
+  - 修复：飞行状态（TAKEOFF/NAVIGATING/HOVERING）下保持当前索引，仅限制不超过新航点数量；仅 IDLE/PRE_FLIGHT 状态下重置
+
+- **【CRITICAL】修复 `handleTakeoff` 起飞超时永远不触发：**
+  - 问题：超时检查使用 `last_mode_request_time_`（每次重试都会刷新），导致 OFFBOARD 请求持续失败时永远不会超时
+  - 修复：改为使用 `state_enter_time_`（从进入 TAKEOFF 状态开始计时），超时后正确进入 LANDING
+
+- **【CRITICAL】修复 `handleReturning` 双重 setpoint 发布：**
+  - 问题：`handleReturning()` 直接 publish + `setpointTimerCallback` 也 publish，导致 RETURNING 状态产生 30+ Hz setpoint（应为 20Hz）
+  - 修复：删除 `handleReturning()` 中的直接 publish，setpoint 统一由 `setpointTimerCallback` 发布
+
+#### safety_monitor.cpp 修复
+
+- **【CRITICAL】新增 MAVROS 状态超时检测：**
+  - 问题：MAVROS 进程崩溃后消息停止到达，但 `current_mavros_state_.connected` 保持上次的 `true` 值，永远检测不到崩溃
+  - 修复：新增 `last_mavros_state_time_` 时间戳，在 `checkTimerCallback` 中检查消息新鲜度，超时发布 `MAVROS_TIMEOUT` 告警
+
+#### waypoint_manager.cpp 修复
+
+- **【CRITICAL】新增路径遍历保护：**
+  - 问题：`loadWaypointsCallback` 和 `saveWaypointsCallback` 接受任意文件路径直接传给 `std::ifstream/ofstream`，存在路径遍历漏洞（`../etc/passwd`）
+  - 修复：新增 `isPathSafe()` 函数，拒绝包含 `..` 的路径，使用 `realpath()` 解析并校验在允许目录范围内，禁止访问 `/home/groundstation/` 之外的文件
+
+### Phase 10: 关键修复 — 前端 RViz 插件
+
+#### waypoint_panel.cpp 修复
+
+- **【CRITICAL】修复 `clearMarkers()` 使用无命名空间 DELETEALL：**
+  - 问题：`marker_delete.action = DELETEALL` 未指定命名空间，会删除所有发布到 `visualization_marker` 话题的 marker（包括其他插件的）
+  - 修复：分别为 `uav_waypoint_arrow` 和 `uav_waypoint_number` 命名空间发送 DELETEALL
+
+- **【CRITICAL】修复 `deleteSelectedPlanPoint()` 双重删除导致数据损坏：**
+  - 问题：此函数先从 `plan_maker_points_` 删除元素，再调用 `deleteSelectedWaypoint()` 再次删除，第二次删除会误删相邻元素
+  - 修复：删除函数中的直接 erase，改为设置表格当前行后由 `deleteSelectedWaypoint()` 统一管理数据结构
+
+- **【CRITICAL】修复 `clearWaypoints()` 不发布空 PoseArray：**
+  - 问题：清空后 waypoint_manager 和 navigator 仍持有上次的航点数据，如果此时收到 START 命令会使用过期航点
+  - 修复：新增发布空 `PoseArray` 和空 `Float64MultiArray`，并重置 `confirmed_waypoint_count_`
+
+- **【HIGH】修复 `moveWaypointUp/Down` 不更新 `plan_maker_selected_index_`：**
+  - 问题：上移/下移航点后 `plan_maker_selected_index_` 未同步更新，导致后续删除操作指向错误元素
+  - 修复：在交换操作后同步更新索引
+
+#### multi_navi_goal_panel.cpp 修复
+
+- **【CRITICAL】修复 `loadFromXml()` 丢弃航点数据：**
+  - 问题：从 waypoint_manager 服务响应获取了完整航点数据（`srv.response.waypoints`），但仅使用 `waypoint_count` 显示消息框，实际数据被完全忽略
+  - 修复：直接从服务响应的 `waypoints.poses` 填充 `pose_array_`、表格和可视化标记
+
+### 编译验证
+
+- 全部 4 个包编译成功：**0 错误，0 警告**
+- `uav_navigator`, `uav_waypoint_manager`, `rviz_waypoint_panel`, `navi_multi_goals_pub_rviz_plugin`
+
+### 审计发现汇总（待后续修复的重要问题）
+
+以下问题已在审计中识别但本次迭代未修复，记录供后续规划：
+
+| 严重级别 | 文件 | 问题描述 |
+|---------|------|---------|
+| CRITICAL | navigator.cpp | `state_mutex_` 声明但从未 lock — AsyncSpinner(2) 多线程并发访问无保护 |
+| HIGH | waypoint_panel.cpp | `loadWaypoints()` 和 `executeMission()` 中使用阻塞式 `waitForMessage` 冻结 Qt 主线程 |
+| HIGH | waypoint_panel.cpp | `loadConfigFromFile()` 使用阻塞式 `QProcess::waitForFinished(5000)` |
+| HIGH | waypoint_panel.cpp | `launchGroundStation()` 和 `killGroundStation()` 使用阻塞式 `system()` 调用 |
+| HIGH | waypoint_panel.cpp | 多处硬编码文件路径 `/home/groundstation/waypoints.xml` |
+| HIGH | waypoint_panel.cpp | `isTableCellValid()` 声明但未实现（链接错误风险）|
+| HIGH | waypoint_panel.cpp | `plan_maker_dirty_` 设置但从未读取（死代码）|
+| IMPORTANT | navigator.cpp | `handleNavigating()` 使用 `== 0.0` 浮点精确比较 Z 坐标 |
+| IMPORTANT | navigator.cpp | 多处硬编码 `"map"` frame_id（应可配置）|
+| IMPORTANT | experiment_recorder.cpp | `ensureDirectory()` 忽略所有 `mkdir` 返回值 |
+| IMPORTANT | experiment_recorder.cpp | 自动记录逻辑使用魔数而非 `NavigatorStatus::STATE_*` 常量 |
+| IMPORTANT | logger.cpp | `setpointCallback` 为空操作存根（死订阅浪费带宽）|
+| IMPORTANT | safety_monitor.cpp | `setpoint_count_` 声明并递增但从未读取（死代码）|
+
+---
+
 ## [2.0.0] - 2026-07-17 - 全面代码审计与关键修复
 
-### Phase 1: Workspace Cleanup
-- **Deleted** `agent-skills/` — independent Claude Code plugin, unrelated to UAV
-- **Deleted** `uav_hover/` — legacy package with hardcoded values and safety issues
-- **Deleted** `src/rviz_navi_multi_goals_pub_plugin/` — legacy RViz plugin (incompatible with MAVROS)
-- **Deleted** per-package deprecated configs (`navigator_config.yaml`, `panel_config.yaml`, `manager_config.yaml`)
-- **Deleted** duplicate rviz config files (root `uav_navigation.rviz`, `uav_navigator/config/uav_navigation.rviz`)
-- **Deleted** all test scripts and test data
-- **Deleted** `uav_navigator/test/` directory and `scripts/__pycache__/`
-- **Added** `.gitignore` for build artifacts and IDE files
-- **Initialized** Git repository for change tracking
+### 第一阶段：工作区清理
+- **删除** `agent-skills/` — 独立 Claude Code 插件，与无人机项目无关
+- **删除** `uav_hover/` — 遗留包，存在硬编码值和安全问题
+- **删除** `src/rviz_navi_multi_goals_pub_plugin/` — 遗留 RViz 插件（不兼容 MAVROS），已在 v2.1.0 恢复并优化
+- **删除** 废弃的各包独立配置文件（`navigator_config.yaml`、`panel_config.yaml`、`manager_config.yaml`）
+- **删除** 重复的 rviz 配置文件（根目录和 `uav_navigator/config/` 下的 `uav_navigation.rviz`）
+- **删除** 全部测试脚本和测试数据
+- **删除** `uav_navigator/test/` 目录和 `scripts/__pycache__/`
+- **新增** `.gitignore` 忽略编译产物和 IDE 文件
+- **初始化** Git 仓库用于变更追踪
 
-### Phase 2: Critical Fixes — Navigator (navigator.cpp)
-- **Fixed** `time_since_start` always equal to `time_in_current_state` (copy-paste bug, now uses `mission_start_time_`)
-- **Fixed** RETURNING state can stall forever without home position (added timeout = takeoff_timeout x 3)
-- **Fixed** TAKEOFF pre-publish phase has no timeout (added offboard_timeout guard)
-- **Fixed** division by zero when `setpoint_rate=0` (added validation with fallback to 20.0 Hz)
-- **Fixed** pre-flight passes while drone dangerously above takeoff height (blocks takeoff if > takeoff_height + max(3m, 2x takeoff_height))
-- **Fixed** double-publishing setpoints (removed from handle* functions, setpointTimerCallback is single source)
-- **Fixed** landing/emergency timeouts hardcoded (now configurable via `mode/landing_timeout` and `mode/emergency_timeout`)
-- **Fixed** emergency reason strings mixed Chinese/English (all English now)
-- **Fixed** static local variables in timer callbacks (replaced with ROS_INFO_THROTTLE)
-- **Removed** dead `offboard_entry_ready_` member
-- **Added** `mission_start_time_` tracking for correct experiment metrics
-- **Added** parameter validation for `landing_timeout`, `emergency_timeout`
+### 第二阶段：关键修复 — 导航器 (navigator.cpp)
+- **修复** `time_since_start` 始终等于 `time_in_current_state`（复制粘贴 bug，现已使用 `mission_start_time_` 正确计算）
+- **修复** RETURNING（返航）状态在无 home 位置时永久悬停（新增超时 = 起飞超时×3）
+- **修复** TAKEOFF（起飞）预发布阶段无超时保护（新增 offboard_timeout 守卫）
+- **修复** `setpoint_rate=0` 时除零错误（新增验证，回退到 20.0 Hz）
+- **修复** 起飞前检查在无人机危险高度以上时仍通过（当前高度 > 起飞高度 + max(3m, 2×起飞高度) 时阻止起飞）
+- **修复** 双重发布 setpoint（从各 handle* 函数中移除，setpointTimerCallback 为唯一发布源）
+- **修复** 降落/紧急状态超时硬编码（现在可通过 `mode/landing_timeout` 和 `mode/emergency_timeout` 配置）
+- **修复** 紧急原因字符串中英混合（全部改为英文）
+- **修复** 定时器回调中的静态局部变量（替换为 ROS_INFO_THROTTLE）
+- **删除** 死代码 `offboard_entry_ready_` 成员变量
+- **新增** `mission_start_time_` 追踪以正确计算实验指标
+- **新增** `landing_timeout` 和 `emergency_timeout` 参数验证
 
-### Phase 3: Critical Fixes — Safety Monitor (safety_monitor.cpp)
-- **Added** heartbeat publisher on `uav/safety/heartbeat` — proves safety_monitor is alive each check cycle
-- **Added** NaN/Inf validation on all position data (`isPositionValid()` guard)
-- **Added** config parameter validation (check_interval, max_height_limit, communication_timeout bounds)
-- **Added** try-catch in checkTimerCallback (exceptions no longer crash the safety monitor)
-- **Added** alert deduplication (same alert type not repeated within `alert_min_interval` seconds)
-- **Added** subscriber check on emergency_stop (warns if no subscriber on alert topic)
-- **Fixed** position jump detection: first message no longer checked, post-jump reference preserved (not overwritten)
-- **Fixed** position jump window adapts to actual odom rate
-- **Fixed** no-odom short-circuit: now only skips height check, other checks still run
-- **Fixed** `has_navigator_status_` no longer reset to false after timeout (re-alerts continue)
-- **Fixed** used `NavigatorStatus` message constants instead of magic numbers for state detection
-- **Fixed** MAVROS disconnect alert now uses "MAVROS_DISCONNECTED" (was "COMMUNICATION_TIMEOUT", now distinct)
-- **Fixed** navigator timeout alert now uses "NAVIGATOR_TIMEOUT" (was "COMMUNICATION_TIMEOUT", now distinct)
-- **Fixed** mode mismatch `isZero()` check instead of `toSec() == 0.0`
+### 第三阶段：关键修复 — 安全监控 (safety_monitor.cpp)
+- **新增** 心跳发布者（`uav/safety/heartbeat`）— 每次检查周期证明 safety_monitor 存活
+- **新增** 所有位置数据的 NaN/Inf 验证（`isPositionValid()` 守卫）
+- **新增** 配置参数验证（check_interval、max_height_limit、communication_timeout 边界检查）
+- **新增** checkTimerCallback 中的 try-catch 保护（异常不再导致安全监控崩溃）
+- **新增** 告警去重（同类型告警在 `alert_min_interval` 秒内不重复发布）
+- **新增** emergency_stop 订阅者检查（告警话题无订阅者时发出警告）
+- **修复** 位置跳变检测：首条消息不再检查，跳变后保留参考位置（不覆盖）
+- **修复** 位置跳变窗口自适应实际里程计频率
+- **修复** 无里程计短路逻辑：仅跳过高度检查，其他检查继续执行
+- **修复** `has_navigator_status_` 超时后不再重置为 false（告警可持续触发）
+- **修复** 使用 `NavigatorStatus` 消息常量代替魔数进行状态检测
+- **修复** MAVROS 断开告警使用 "MAVROS_DISCONNECTED"（原为 "COMMUNICATION_TIMEOUT"，现可区分）
+- **修复** 导航器超时告警使用 "NAVIGATOR_TIMEOUT"（原为 "COMMUNICATION_TIMEOUT"，现可区分）
+- **修复** 模式不匹配使用 `isZero()` 检查而非 `toSec() == 0.0`
 
-### Phase 4: Critical Fixes — Waypoint Manager (waypoint_manager.cpp)
-- **Fixed** CRITICAL self-subscription feedback loop: param subscriber and publisher now use different topics
-  - Subscribes to: `uav/waypoints/params` (from panel)
-  - Publishes to: `uav/waypoints/params_loaded` (to panel, new topic)
-- **Added** NaN/Inf coordinate validation in waypointsCallback and loadFromXml
-- **Added** per-stod try-catch with individual field error handling
-- **Added** partial XML load rollback (temp containers, only commit on success)
-- **Added** empty file check before XML parse
-- **Fixed** `sprintf` replaced with `snprintf` for buffer safety
-- **Fixed** unsigned underflow risk in checkWaypointSpacing (uses `i + 1 < poses.size()` pattern)
-- **Added** try-catch in service callbacks
+### 第四阶段：关键修复 — 航点管理器 (waypoint_manager.cpp)
+- **修复** 【CRITICAL】自订阅反馈回环：参数订阅者和发布者现在使用不同话题
+  - 订阅：`uav/waypoints/params`（来自面板）
+  - 发布：`uav/waypoints/params_loaded`（至面板，新话题）
+- **新增** waypointsCallback 和 loadFromXml 中的 NaN/Inf 坐标验证
+- **新增** per-stod 逐个字段 try-catch 及独立错误处理
+- **新增** XML 部分加载回滚机制（临时容器，仅在成功时提交）
+- **新增** XML 解析前空文件检查
+- **修复** `sprintf` 替换为 `snprintf`（缓冲区安全）
+- **修复** checkWaypointSpacing 中的无符号下溢风险（使用 `i + 1 < poses.size()` 模式）
+- **新增** 服务回调中的 try-catch 保护
 
-### Phase 5: Critical Fixes — RViz Panel (waypoint_panel.cpp/h)
-- **Fixed** `clearWaypoints()` now also clears `plan_maker_points_`, params vectors, trajectory, and resets phase
-- **Fixed** `startSpin()` changed from static to non-static member function (fixes Qt signal/slot reliability)
-- **Fixed** waypoint params subscriber uses `uav/waypoints/params_loaded` topic (avoids feedback loop)
-- **Fixed** no-op `checkWaypointConfirmation()` removed (confirmation handled in receiveNavStatus)
+### 第五阶段：关键修复 — RViz 面板 (waypoint_panel.cpp/h)
+- **修复** `clearWaypoints()` 现在同时清除 `plan_maker_points_`、参数向量、轨迹并重置阶段
+- **修复** `startSpin()` 从 static 改为非静态成员函数（修复 Qt 信号/槽可靠性）
+- **修复** 航点参数订阅者使用 `uav/waypoints/params_loaded` 话题（避免反馈回环）
+- **修复** 移除空操作 `checkWaypointConfirmation()`（确认逻辑已在 receiveNavStatus 中处理）
 
-### Phase 6: Logger Display Fix (logger.cpp)
-- **Rewrote** logger with ANSI color-coded state display
-- **Added** clear screen on startup with compact table header
-- **Added** per-state color formatting (blue=idle, green=navigating, red=emergency)
-- **Removed** verbose per-event logging (data aggregated in status line)
-- **Added** automatic table header reprint every 20 lines
+### 第六阶段：Logger 显示修复 (logger.cpp)
+- **重写** Logger，支持 ANSI 颜色编码状态显示
+- **新增** 启动时清屏，配合紧凑表头
+- **新增** 按状态着色格式（蓝=空闲，绿=导航中，红=紧急）
+- **移除** 冗余的逐事件日志（数据聚合到状态行）
+- **新增** 每 20 行自动重印表头
 
-### Phase 7: Configuration Updates (config.yaml)
-- **Added** `topics/waypoint_params_input` and `topics/waypoint_params_current`
-- **Added** `mode/landing_timeout: 60.0` and `mode/emergency_timeout: 120.0`
-- **Added** `safety/heartbeat_topic: "uav/safety/heartbeat"`
-- **Added** `safety/alert_min_interval: 1.0`
+### 第七阶段：配置更新 (config.yaml)
+- **新增** `topics/waypoint_params_input` 和 `topics/waypoint_params_current`
+- **新增** `mode/landing_timeout: 60.0` 和 `mode/emergency_timeout: 120.0`
+- **新增** `safety/heartbeat_topic: "uav/safety/heartbeat"`
+- **新增** `safety/alert_min_interval: 1.0`
 
-### Build Verification
-- All 3 packages compile: **0 errors, 0 warnings**
-- `uav_navigator`, `uav_waypoint_manager`, `rviz_waypoint_panel`
+### 编译验证
+- 全部 3 个包编译通过：**0 错误，0 警告**
+- `uav_navigator`、`uav_waypoint_manager`、`rviz_waypoint_panel`
 
 ---
 

@@ -44,6 +44,7 @@ private:
     ros::Time last_setpoint_time_;
     ros::Time mode_mismatch_start_time_;
     ros::Time last_odom_time_;
+    ros::Time last_mavros_state_time_;       // MAVROS 状态消息最后接收时间
     geometry_msgs::Point last_odom_position_;
     int setpoint_count_;
 
@@ -99,6 +100,7 @@ SafetyMonitor::SafetyMonitor(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     last_setpoint_time_ = ros::Time::now();
     mode_mismatch_start_time_ = ros::Time(0);
     last_odom_time_ = ros::Time(0);
+    last_mavros_state_time_ = ros::Time(0);
     last_alert_time_ = ros::Time(0);
 
     ROS_INFO("[SafetyMonitor] Initialization complete. Heartbeat on: %s", config_.heartbeat_topic.c_str());
@@ -221,6 +223,7 @@ void SafetyMonitor::odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
 void SafetyMonitor::mavrosStateCallback(const mavros_msgs::State::ConstPtr& msg) {
     current_mavros_state_ = *msg;
     has_mavros_state_ = true;  // 持续更新，表示正在接收 MAVROS 状态
+    last_mavros_state_time_ = ros::Time::now();  // 记录最后收到 MAVROS 状态的时间
 }
 
 void SafetyMonitor::navigatorStatusCallback(const uav_navigator::NavigatorStatus::ConstPtr& msg) {
@@ -309,6 +312,15 @@ void SafetyMonitor::checkTimerCallback(const ros::TimerEvent& event) {
         if (has_mavros_state_ && !current_mavros_state_.connected) {
             ROS_ERROR("[SafetyMonitor] MAVROS connection lost!");
             publishAlert("MAVROS_DISCONNECTED");
+        }
+
+        // 5b. MAVROS 状态消息超时检查（MAVROS 进程崩溃后消息停止到达）
+        if (has_mavros_state_ && !last_mavros_state_time_.isZero()) {
+            double mavros_elapsed = (ros::Time::now() - last_mavros_state_time_).toSec();
+            if (mavros_elapsed > config_.communication_timeout) {
+                ROS_ERROR("[SafetyMonitor] MAVROS state timeout: no state update for %.1f s", mavros_elapsed);
+                publishAlert("MAVROS_TIMEOUT");
+            }
         }
     } catch (const std::exception& e) {
         ROS_ERROR("[SafetyMonitor] Exception in check timer callback: %s", e.what());
