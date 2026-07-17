@@ -14,6 +14,8 @@
 #include <QGroupBox>
 #include <QInputDialog>
 #include <QTextEdit>
+#include <QTextBlock>
+#include <QTextCursor>
 #include <QFrame>
 #include <QProgressBar>
 #include <QComboBox>
@@ -444,6 +446,10 @@ void WaypointPanel::loadConfig() {
     pnh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
     pnh.param<std::string>("panel/waypoint_current_topic", config_.waypoint_current_topic, "uav/waypoints/current");
 
+    // 文件路径
+    pnh.param<std::string>("paths/default_save", config_.default_save_path, "/home/groundstation/waypoints.xml");
+    pnh.param<std::string>("paths/default_load", config_.default_load_path, "/home/groundstation/waypoints.xml");
+
     // 从全局命名空间读取默认飞行参数
     ros::NodeHandle global_nh;
     global_nh.param<double>("flight_defaults/hover_duration", default_hover_time_, 5.0);
@@ -460,14 +466,29 @@ void WaypointPanel::onConfigGroupToggled(bool checked) {
 void WaypointPanel::logInfo(const QString &msg) {
     QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
     log_text_->append(QString("<span style='color:#4CAF50'>[%1] INFO</span> %2").arg(timestamp, msg));
+    // 限制日志行数，防止长时间运行内存膨胀
+    truncateLog();
 }
 void WaypointPanel::logWarn(const QString &msg) {
     QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
     log_text_->append(QString("<span style='color:#FF9800'>[%1] WARN</span> %2").arg(timestamp, msg));
+    truncateLog();
 }
 void WaypointPanel::logError(const QString &msg) {
     QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
     log_text_->append(QString("<span style='color:#F44336'>[%1] ERROR</span> %2").arg(timestamp, msg));
+    truncateLog();
+}
+
+void WaypointPanel::truncateLog() {
+    const int MAX_LOG_LINES = 500;
+    QTextDocument *doc = log_text_->document();
+    while (doc->blockCount() > MAX_LOG_LINES) {
+        QTextCursor cursor(doc->begin());
+        cursor.select(QTextCursor::BlockUnderCursor);
+        cursor.removeSelectedText();
+        cursor.deleteChar();  // 删除换行符
+    }
 }
 
 // ========== 状态转换辅助 ==========
@@ -1114,7 +1135,8 @@ void WaypointPanel::saveWaypoints() {
         return;
     }
     publishWaypoints();
-    QString filePath = QFileDialog::getSaveFileName(this, "保存航点", "/home/groundstation/waypoints.xml", "XML Files (*.xml)");
+    QString default_path = QString::fromStdString(config_.default_save_path);
+    QString filePath = QFileDialog::getSaveFileName(this, "保存航点", default_path, "XML Files (*.xml)");
     if (filePath.isEmpty()) return;
     uav_waypoint_manager::SaveWaypoints srv;
     srv.request.file_path = filePath.toStdString();
@@ -1131,7 +1153,8 @@ void WaypointPanel::saveWaypoints() {
 }
 
 void WaypointPanel::loadWaypoints() {
-    QString filePath = QFileDialog::getOpenFileName(this, "加载航点", "/home/groundstation", "XML Files (*.xml)");
+    QString default_path = QString::fromStdString(config_.default_load_path);
+    QString filePath = QFileDialog::getOpenFileName(this, "加载航点", default_path, "XML Files (*.xml)");
     if (filePath.isEmpty()) return;
     uav_waypoint_manager::LoadWaypoints srv;
     srv.request.file_path = filePath.toStdString();
@@ -1456,9 +1479,9 @@ void WaypointPanel::killGroundStation() {
 }
 
 void WaypointPanel::oneKeyTakeoff() {
-    logInfo("一键起飞: 发布航点 -> 启动导航");
+    logInfo("一键起飞: 启动导航（startNavigation 自动发布航点）");
     logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
-    publishWaypoints();
+    // startNavigation() 内部已调用 publishWaypoints()，无需重复
     startNavigation();
 }
 
@@ -1476,9 +1499,9 @@ void WaypointPanel::executeMission() {
     logInfo("执行任务: 加载默认航点文件");
     logInfo("提示：RC 遥控器拥有最高控制权，可随时切换模式接管无人机");
 
-    // 尝试加载默认文件
+    // 尝试加载默认文件（路径从配置读取）
     uav_waypoint_manager::LoadWaypoints srv;
-    srv.request.file_path = "/home/groundstation/waypoints.xml";
+    srv.request.file_path = config_.default_load_path;
     if (load_waypoints_client_.call(srv) && srv.response.success) {
         logInfo(QString::fromStdString(srv.response.message));
         const auto& waypoints = srv.response.waypoints;

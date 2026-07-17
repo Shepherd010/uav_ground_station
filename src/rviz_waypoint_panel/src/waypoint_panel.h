@@ -135,13 +135,13 @@ protected:
 
     // 表格
     geometry_msgs::PoseArray readWaypointsFromTable();
-    bool isTableCellValid(int row, int col);
     void updateStatusDisplay(const uav_navigator::NavigatorStatus &status);
 
     // 日志
     void logInfo(const QString &msg);
     void logWarn(const QString &msg);
     void logError(const QString &msg);
+    void truncateLog();  // 限制日志行数，防止内存膨胀
 
     // 辅助
     QString stateToString(uint8_t state);
@@ -202,6 +202,8 @@ protected:
         std::string config_loaded_topic;
         std::string config_reload_topic;
         std::string waypoint_current_topic;
+        std::string default_save_path;     // 默认航点保存路径
+        std::string default_load_path;     // 默认航点加载路径
     } config_;
 
     // ===== 数据 =====
