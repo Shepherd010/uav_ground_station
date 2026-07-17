@@ -1,0 +1,5 @@
+string command
+# 可选值: START, PAUSE, CANCEL, LAND, RETURN_TO_HOME, EMERGENCY_STOP, RESET
+---
+bool success
+string message

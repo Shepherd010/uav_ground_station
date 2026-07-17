@@ -1,0 +1,7 @@
+<library path="lib/librviz_waypoint_panel">
+  <class name="rviz_waypoint_panel/WaypointPanel"
+         type="rviz_waypoint_panel::WaypointPanel"
+         base_class_type="rviz::Panel">
+    <description>无人机航点标注与导航面板：支持航点标注、可视化、保存、加载和导航状态监控。</description>
+  </class>
+</library>

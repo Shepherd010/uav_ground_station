@@ -1,0 +1,10 @@
+<!-- RViz ground station launch file -->
+<!-- Starts: RViz with the waypoint panel plugin -->
+<!-- Run on: ground station -->
+<launch>
+    <!-- Load panel configuration -->
+    <rosparam command="load" file="$(find rviz_waypoint_panel)/../../config.yaml" />
+
+    <!-- Start RViz with the integrated navigation configuration -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find rviz_waypoint_panel)/config/uav_navigation.rviz" output="screen" />
+</launch>

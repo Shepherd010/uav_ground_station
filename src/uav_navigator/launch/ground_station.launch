@@ -1,0 +1,32 @@
+<!-- Ground station core launch file -->
+<!-- Starts: roscore (via roslaunch) + config loading + safety monitor + waypoint manager + navigator -->
+<!-- Run on: ground station -->
+<launch>
+    <!-- Load global navigator and safety configuration -->
+    <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
+
+    <!-- Safety monitor -->
+    <node name="uav_safety_monitor" pkg="uav_navigator" type="safety_monitor" output="screen">
+        <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
+    </node>
+
+    <!-- Waypoint manager -->
+    <node name="uav_waypoint_manager" pkg="uav_waypoint_manager" type="waypoint_manager" output="screen">
+        <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
+    </node>
+
+    <!-- Navigator state machine -->
+    <node name="uav_navigator" pkg="uav_navigator" type="navigator" output="screen">
+        <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
+    </node>
+
+    <!-- Logger (formatted status output) -->
+    <node name="uav_logger" pkg="uav_navigator" type="logger" output="screen">
+        <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
+    </node>
+
+    <!-- Experiment recorder (data logging) -->
+    <node name="uav_experiment_recorder" pkg="uav_navigator" type="experiment_recorder" output="screen">
+        <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
+    </node>
+</launch>

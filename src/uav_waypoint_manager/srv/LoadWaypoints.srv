@@ -1,0 +1,6 @@
+string file_path
+---
+bool success
+string message
+uint8 waypoint_count
+geometry_msgs/PoseArray waypoints

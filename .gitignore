@@ -1,0 +1,25 @@
+# Catkin build artifacts
+build/
+devel/
+logs/
+.catkin_tools/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ROS
+*.bag
+*.active

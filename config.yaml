@@ -1,0 +1,224 @@
+# ============================================================================
+# UAV Ground Station 统一配置文件（唯一可变参数来源）
+# ============================================================================
+# 参数分类：
+#   第一类 infrastructure — 话题/服务/路径，极少改动，需重启节点生效
+#   第二类 safety/offboard/mode/position — 安全与阈值，通过面板加载后立即生效
+#   第三类 flight_defaults — 默认飞行参数，可被每个航点覆盖（提供默认值）
+#   第四类 waypoint — 导航精度参数，通过面板加载后立即生效
+#   第五类 panel — RViz 面板可视化参数
+#   第六类 logger/experiment — 日志和实验记录
+#
+# 修改方式：
+#   1. 编辑本文件
+#   2. 在 RViz 面板 → 配置参数 → 从文件加载 → 选择本文件
+#   3. 参数立即生效（无需重启节点）
+# ============================================================================
+
+# ============================================================================
+# 第一类：基础设施参数（话题名、服务名、文件路径）
+# 极少改动，修改后需重启节点生效
+# ============================================================================
+namespace: ""
+
+topics:
+  # MAVROS 话题
+  mavros_state: "mavros/state"
+  local_position_odom: "mavros/local_position/odom"
+  setpoint_position: "mavros/setpoint_position/local"
+  arming_service: "mavros/cmd/arming"
+  set_mode_service: "mavros/set_mode"
+  # 系统内部话题
+  waypoint_input: "uav/waypoints/input"
+  waypoint_current: "uav/waypoints/current"
+  waypoint_params_input: "uav/waypoints/params"
+  waypoint_params_current: "uav/waypoints/params_loaded"
+  navigator_status: "uav/navigator/status"
+  navigator_command: "uav/navigator/command"
+  safety_alert: "uav/safety/alert"
+  emergency_stop: "uav/safety/emergency_stop"
+  planned_path: "uav/trajectory/planned"
+  real_path: "uav/trajectory/real"
+  metrics_topic: "uav/experiment/metrics"
+  record_control_topic: "uav/experiment/record"
+  config_loaded_topic: "uav/config/loaded"
+  config_reload_topic: "uav/config/reload"
+
+services:
+  load: "uav/waypoint_manager/load_waypoints"
+  save: "uav/waypoint_manager/save_waypoints"
+  clear: "uav/waypoint_manager/clear_waypoints"
+
+paths:
+  default_save: "/home/groundstation/waypoints.xml"
+  default_load: "/home/groundstation/waypoints.xml"
+
+# ============================================================================
+# 第二类：安全与阈值参数
+# 通过面板加载后立即生效（节点订阅 config_reload_topic 自动重载）
+# ============================================================================
+
+# OFFBOARD 模式安全参数
+offboard_safety:
+  min_setpoint_rate_hz: 10.0
+  setpoint_timeout_warn: 0.5
+  setpoint_timeout_emergency: 1.0
+  mode_mismatch_tolerance: 2.0
+
+# 位置异常检测
+position_safety:
+  max_jump_distance: 2.0
+  jump_window: 0.1
+
+# 硬性安全边界
+safety:
+  max_height_limit: 2.0          # 最大允许飞行高度（米），超过即触发紧急保护
+  communication_timeout: 5.0     # 通信超时（秒）
+  battery_threshold: 20.0        # 电池电量低阈值（%）
+  check_interval: 1.0            # safety_monitor 检查间隔（秒）
+  heartbeat_topic: "uav/safety/heartbeat"  # 心跳话题，证明 safety_monitor 存活
+  alert_min_interval: 1.0        # 同类型告警最小发布间隔（秒）
+
+# 模式切换超时
+mode:
+  offboard_timeout: 8.0
+  landing_timeout: 60.0          # 降落超时（秒），超过后强制转为 LANDED
+  emergency_timeout: 120.0       # 紧急状态超时（秒），超过后强制转为 LANDED
+  mode_retry_interval: 5.0
+  arm_retry_interval: 5.0
+
+# ============================================================================
+# 第三类：默认飞行参数（提供全局默认值，可在每个航点中覆盖）
+# ============================================================================
+flight_defaults:
+  takeoff_height: 1.0            # 默认起飞高度（米）
+  takeoff_timeout: 20.0          # 起飞阶段超时（秒）
+  hover_duration: 5.0            # 默认航点悬停时间（秒），可在表格中逐点修改
+  travel_speed: 2.0              # 默认飞行速度（m/s），可在表格中逐点修改
+  setpoint_rate: 20.0            # setpoint 发布频率（Hz）
+  offboard_pre_pub_count: 100    # OFFBOARD 预发布数量
+  landing_height_threshold: 0.15 # 降落完成高度阈值（米）
+
+# 兼容旧代码的 flight 节（与 flight_defaults 保持同步）
+flight:
+  takeoff_height: 1.0
+  takeoff_timeout: 20.0
+  hover_duration: 5.0
+  travel_speed: 2.0
+  setpoint_rate: 20.0
+  offboard_pre_pub_count: 100
+  landing_height_threshold: 0.15
+
+# ============================================================================
+# 第四类：导航精度参数
+# ============================================================================
+waypoint:
+  reach_threshold_xy: 0.15       # 水平到达阈值（米）
+  reach_threshold_z: 0.2         # 垂直到达阈值（米）
+  min_waypoint_spacing: 0.3      # 最小航点间距（米），验证时警告
+
+# ============================================================================
+# 第五类：航点验证参数（waypoint_manager）
+# ============================================================================
+validation:
+  min_waypoint_spacing: 0.3
+  max_height: 2.0
+  min_height: 0.5
+
+publish_rate: 1.0
+
+# ============================================================================
+# 第六类：RViz 面板可视化参数
+# ============================================================================
+panel:
+  default_config_path: "/home/groundstation/catkin_ws/config.yaml"
+
+  # 话题配置
+  goal_topic: "move_base_simple/goal"
+  marker_topic: "visualization_marker"
+  waypoint_input_topic: "uav/waypoints/input"
+  waypoint_current_topic: "uav/waypoints/current"
+  navigator_status_topic: "uav/navigator/status"
+  mavros_state_topic: "mavros/state"
+  odom_topic: "mavros/local_position/odom"
+  save_service: "uav/waypoint_manager/save_waypoints"
+  load_service: "uav/waypoint_manager/load_waypoints"
+  nav_command_service: "uav/navigator/command"
+
+  # 航点规划（Plan Maker）可视化
+  plan_maker:
+    points_topic: "uav/plan_maker/points"
+    trajectory_topic: "uav/plan_maker/trajectory"
+    sphere_scale: 0.15
+    color_r: 1.0
+    color_g: 0.65
+    color_b: 0.0
+    color_a: 0.9
+    trajectory_width: 0.05
+
+  # Marker 可视化（航点箭头）
+  marker:
+    arrow_scale_x: 0.6
+    arrow_scale_y: 0.15
+    arrow_scale_z: 0.15
+    number_scale: 0.8
+    number_offset_z: 0.6
+    color_r: 1.0
+    color_g: 0.84
+    color_b: 0.0
+    color_a: 1.0
+
+  # 表格参数
+  table:
+    default_max_goals: 10
+    columns: ["x", "y", "z", "yaw"]
+
+  # 定时器参数
+  spin_timer_ms: 100
+
+  # 面板显示的关键飞行/安全参数路径
+  display_params:
+    - "flight_defaults/takeoff_height"
+    - "flight_defaults/hover_duration"
+    - "flight_defaults/setpoint_rate"
+    - "waypoint/reach_threshold_xy"
+    - "waypoint/reach_threshold_z"
+    - "safety/max_height_limit"
+    - "safety/communication_timeout"
+
+# ============================================================================
+# 第七类：Logger 配置
+# ============================================================================
+logger:
+  odom_topic: "mavros/local_position/odom"
+  mavros_state_topic: "mavros/state"
+  navigator_status_topic: "uav/navigator/status"
+  safety_alert_topic: "uav/safety/alert"
+  setpoint_topic: "mavros/setpoint_position/local"
+  metrics_topic: "uav/experiment/metrics"
+  config_loaded_topic: "uav/config/loaded"
+  print_odom: true
+  print_mavros_state: true
+  print_nav_status: true
+  print_safety_alert: true
+  print_setpoint: false
+  print_metrics: true
+  print_rate: 2.0
+
+# ============================================================================
+# 第八类：实验记录配置
+# ============================================================================
+experiment:
+  output_dir: "/home/groundstation/experiments"
+  auto_record: true
+  real_path_sample_interval: 0.1
+  max_real_path_points: 500       # real_path 最大点数（FIFO），防止 RViz 卡顿
+  metrics_topic: "uav/experiment/metrics"
+  status_topic: "uav/navigator/status"
+  odom_topic: "mavros/local_position/odom"
+  setpoint_topic: "mavros/setpoint_position/local"
+  mavros_state_topic: "mavros/state"
+  safety_alert_topic: "uav/safety/alert"
+  planned_path_topic: "uav/trajectory/planned"
+  real_path_topic: "uav/trajectory/real"
+  record_control_topic: "uav/experiment/record"
