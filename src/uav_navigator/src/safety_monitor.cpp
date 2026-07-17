@@ -46,7 +46,6 @@ private:
     ros::Time last_odom_time_;
     ros::Time last_mavros_state_time_;       // MAVROS 状态消息最后接收时间
     geometry_msgs::Point last_odom_position_;
-    int setpoint_count_;
 
     // 告警去重：跟踪上次发布的告警类型和时间
     std::string last_alert_type_;
@@ -92,7 +91,7 @@ private:
 
 SafetyMonitor::SafetyMonitor(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh), has_odom_(false), has_mavros_state_(false), has_navigator_status_(false),
-      last_nav_state_(0), setpoint_count_(0) {
+      last_nav_state_(0) {
 
     loadConfig();
     initROS();
@@ -181,7 +180,6 @@ bool SafetyMonitor::isPositionValid(const geometry_msgs::Point& p) {
 
 void SafetyMonitor::setpointCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
     last_setpoint_time_ = ros::Time::now();
-    setpoint_count_++;
 }
 
 void SafetyMonitor::odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {

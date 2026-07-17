@@ -635,11 +635,11 @@ bool WaypointManager::validateWaypoints(std::string& error_msg) {
         }
     }
 
-    // 高度检查必须通过（>50m 的航点疑似配置错误，拒绝）
+    // 高度检查：NaN/Inf 拒绝，超出建议范围仅警告（不阻止用户特殊需求）
     if (!checkWaypointHeight(error_msg)) return false;
-    // 间距检查仅警告
+    // 间距检查：仅警告
     checkWaypointSpacing(error_msg);
-    // 重复航点仅警告
+    // 重复航点检查：仅警告
     checkDuplicateWaypoints(error_msg);
 
     return true;
