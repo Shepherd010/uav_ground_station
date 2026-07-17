@@ -18,6 +18,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <cerrno>
+#include <cstring>
+#include <sys/stat.h>
 #include <map>
 #include <sys/stat.h>
 
@@ -164,9 +167,15 @@ void ExperimentRecorder::ensureDirectory(const std::string& path) {
     size_t pos = 0;
     while ((pos = path.find('/', pos + 1)) != std::string::npos) {
         std::string sub = path.substr(0, pos);
-        mkdir(sub.c_str(), 0755);
+        if (mkdir(sub.c_str(), 0755) != 0 && errno != EEXIST) {
+            ROS_ERROR("[ExperimentRecorder] Failed to create directory %s: %s", sub.c_str(), strerror(errno));
+            throw std::runtime_error("Cannot create experiment output directory: " + sub);
+        }
     }
-    mkdir(path.c_str(), 0755);
+    if (mkdir(path.c_str(), 0755) != 0 && errno != EEXIST) {
+        ROS_ERROR("[ExperimentRecorder] Failed to create directory %s: %s", path.c_str(), strerror(errno));
+        throw std::runtime_error("Cannot create experiment output directory: " + path);
+    }
 }
 
 std::string ExperimentRecorder::getTimestamp() {
@@ -179,16 +188,16 @@ std::string ExperimentRecorder::getTimestamp() {
 
 std::string ExperimentRecorder::stateToString(uint8_t state) {
     switch (state) {
-        case 0: return "IDLE";
-        case 1: return "PRE_FLIGHT";
-        case 2: return "ARMING";
-        case 3: return "TAKEOFF";
-        case 4: return "NAVIGATING";
-        case 5: return "HOVERING";
-        case 6: return "LANDING";
-        case 7: return "LANDED";
-        case 8: return "EMERGENCY";
-        case 9: return "RETURNING";
+        case uav_navigator::NavigatorStatus::STATE_IDLE:           return "IDLE";
+        case uav_navigator::NavigatorStatus::STATE_PRE_FLIGHT:     return "PRE_FLIGHT";
+        case uav_navigator::NavigatorStatus::STATE_ARMING:         return "ARMING";
+        case uav_navigator::NavigatorStatus::STATE_TAKEOFF:        return "TAKEOFF";
+        case uav_navigator::NavigatorStatus::STATE_NAVIGATING:     return "NAVIGATING";
+        case uav_navigator::NavigatorStatus::STATE_HOVERING:       return "HOVERING";
+        case uav_navigator::NavigatorStatus::STATE_LANDING:        return "LANDING";
+        case uav_navigator::NavigatorStatus::STATE_LANDED:         return "LANDED";
+        case uav_navigator::NavigatorStatus::STATE_EMERGENCY:      return "EMERGENCY";
+        case uav_navigator::NavigatorStatus::STATE_RETURNING:      return "RETURNING";
         default: return "UNKNOWN";
     }
 }
@@ -202,8 +211,9 @@ std::string ExperimentRecorder::getNextExperimentDir() {
     ensureDirectory(date_dir);
 
     int index = 1;
+    const int MAX_INDEX = 9999;
     std::string exp_dir;
-    while (true) {
+    while (index <= MAX_INDEX) {
         std::ostringstream oss;
         oss << date_dir << "/experiment_" << std::setfill('0') << std::setw(3) << index;
         exp_dir = oss.str();
@@ -212,6 +222,10 @@ std::string ExperimentRecorder::getNextExperimentDir() {
             break;
         }
         index++;
+    }
+    if (index > MAX_INDEX) {
+        ROS_ERROR("[ExperimentRecorder] Experiment directory index overflow (>%d)", MAX_INDEX);
+        return "";
     }
     return exp_dir;
 }
@@ -343,10 +357,14 @@ void ExperimentRecorder::metricsCallback(const uav_navigator::ExperimentMetrics:
         if (auto_record_) {
             // Start when mission begins (PRE_FLIGHT or later active states). PRE_FLIGHT can be
             // very short, so we also accept any state between PRE_FLIGHT and LANDING.
-            if (msg->nav_state >= 1 && msg->nav_state <= 6 && !is_recording_) {
+            if (msg->nav_state >= uav_navigator::NavigatorStatus::STATE_PRE_FLIGHT
+                && msg->nav_state <= uav_navigator::NavigatorStatus::STATE_LANDING
+                && !is_recording_) {
                 mission_start_time_ = ros::Time::now();
                 startRecording();
-            } else if ((msg->nav_state == 7 || msg->nav_state == 8) && is_recording_) {
+            } else if ((msg->nav_state == uav_navigator::NavigatorStatus::STATE_LANDED
+                        || msg->nav_state == uav_navigator::NavigatorStatus::STATE_EMERGENCY)
+                       && is_recording_) {
                 stopRecording();
             }
         }
