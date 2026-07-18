@@ -71,7 +71,6 @@ cd /home/groundstation/catkin_ws_copy
 | | `experiment_recorder` | 自动记录 rosbag + CSV + 摘要（按日期/序号组织） |
 | **uav_waypoint_manager** | `waypoint_manager` | XML 持久化，航点验证（坐标/重复/间距/高度），路径遍历保护 |
 | **rviz_waypoint_panel** | (RViz 插件) | Qt5 面板：航点标注、编辑、可视化、导航控制、系统管理、配置热重载 |
-| **navi_multi_goals_pub_rviz_plugin** | — | ⚠️ LEGACY：已废弃，仅保留为代码参考 |
 
 ## 状态机
 
@@ -466,9 +465,6 @@ catkin_ws_copy/
 │   │   ├── launch/rviz_ground_station.launch
 │   │   ├── plugin_description.xml
 │   │   └── CMakeLists.txt
-│   └── rviz_navi_multi_goals_pub_plugin/  # LEGACY（已废弃）
-│       └── navi_multi_goals_pub_rviz_plugin/
-│           └── README.md              # 弃用说明
 ```
 
 ## 更多信息

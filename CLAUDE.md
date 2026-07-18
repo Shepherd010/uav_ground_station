@@ -14,10 +14,6 @@ This is a **ROS (Robot Operating System) catkin workspace** (Noetic, catkin_tool
 2. **`uav_waypoint_manager`** — Waypoint persistence layer. Handles XML save/load, waypoint validation (duplicate detection, spacing checks, height range checks), and PoseArray publishing.
 3. **`rviz_waypoint_panel`** — Fixed RViz panel plugin (Qt5). Receives `move_base_simple/goal`, visualizes waypoints with arrows+numbers, edits (x,y,z,yaw), supports save/load via service calls, shows real-time nav status, and has system control buttons.
 
-**LEGACY (retained as backups, do not use):**
-- `uav_hover/src/hover/` — Old MAVROS nodes with hardcoded values and safety issues.
-- `src/rviz_navi_multi_goals_pub_plugin/` — Old RViz plugin for ground-robot `move_base` (incompatible with MAVROS).
-
 The `agent-skills/` directory is an independent Claude Code plugin project with its own `CLAUDE.md`.
 
 ## Build System
@@ -247,7 +243,5 @@ rostopic list
 
 - **OFFBOARD mode requires >2Hz setpoint stream.** The navigator publishes at 20Hz, but if the timer or node dies, the drone will fall out of the sky. The safety monitor detects this via communication timeout.
 - **RC takeover is always possible.** PX4 allows the RC transmitter to override OFFBOARD mode at any time. This is a hardware-level safety feature, not software.
-- **The legacy `hover.cpp` node stops publishing after 100 messages.** This was a critical bug that would cause crashes in OFFBOARD mode. The new `navigator` node never stops publishing setpoints while active.
-- **The legacy plugin used `move_base_simple/goal_temp` (non-standard).** The new plugin uses the standard `move_base_simple/goal` topic that RViz's 2D Nav Goal tool publishes to by default.
-- **Legacy and new packages coexist.** The old `hover` and `rviz_navi_multi_goals_pub_plugin` packages are kept as backups. Do not modify them. Use the new `uav_navigator`, `uav_waypoint_manager`, and `rviz_waypoint_panel` packages instead.
-- **Phase-numbered launch files are deprecated.** Use `ground_station.launch` and `rviz_ground_station.launch` instead. The old `phase*.launch` files are kept for reference but should not be used.
+- **The legacy `hover.cpp` node stopped publishing after 100 messages.** This was a critical bug that would cause crashes in OFFBOARD mode. The new `navigator` node never stops publishing setpoints while active (historical note).
+- **Phase-numbered launch files are deprecated.** Use `ground_station.launch` and `rviz_ground_station.launch` instead.
