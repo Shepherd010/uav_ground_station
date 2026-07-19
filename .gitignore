@@ -23,3 +23,9 @@ Thumbs.db
 # ROS
 *.bag
 *.active
+
+# Catkin build artifacts
+build/
+devel/
+logs/
+.catkin_tools/
