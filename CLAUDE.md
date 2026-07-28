@@ -42,6 +42,7 @@ The old "phase 1/2/3/5" naming has been removed. Ground station operation uses t
 | Ground station core | `./scripts/start_ground_station.sh` or `roslaunch uav_navigator ground_station.launch` | Ground station | Starts roscore (if needed), navigator, safety_monitor, waypoint_manager |
 | Visualization & waypoint annotation | `./scripts/start_rviz.sh` or `roslaunch rviz_waypoint_panel rviz_ground_station.launch` | Ground station | Starts RViz with the waypoint panel plugin |
 | Execute mission | `./scripts/start_mission.sh <waypoint_file.xml>` | Ground station | Loads waypoints and sends START command |
+| Manual recording | `./scripts/record_bag.sh {start\|stop\|status}` | Ground station | Records all topics (137 topics), auto-naming, start/stop anytime |
 
 ### Onboard setup
 
@@ -131,12 +132,12 @@ These defaults can be overridden by setting the environment variables before run
 
 **Plugin class:** `rviz_waypoint_panel::WaypointPanel` (base: `rviz::Panel`)
 
-**UI:** Status display area (state, current waypoint, position), max-goals input, waypoint table (x,y,z,yaw), delete/up/down buttons, save/load buttons, publish/start-nav/emergency-stop buttons, system control buttons (launch/kill ground station, MAVROS status LED).
+**UI:** Status display area (state, current waypoint, position, workflow progress bar), max-goals input, waypoint table (x,y,z,yaw,hover,speed), delete/up/down buttons, plan workflow buttons (📂加载文件/💾保存文件/🔗连线/📤发布/🗑删除/🧹清空), flight control buttons (⏺录制/▶开始任务/⏸悬停/🛬降落/🏠返航/🔄重置/🛑紧急停止), MAVROS status LEDs.
 
 **Topics:**
-- Subscribe: `move_base_simple/goal` (PoseStamped, from RViz 2D Nav Goal tool), `uav/navigator/status` (NavigatorStatus)
-- Publish: `visualization_marker` (Marker, arrows + numbers), `uav/waypoints/input` (PoseArray)
-- Service clients: `uav/waypoint_manager/save_waypoints`, `uav/waypoint_manager/load_waypoints`
+- Subscribe: `move_base_simple/goal` (PoseStamped, from RViz 2D Nav Goal tool), `uav/navigator/status` (NavigatorStatus), `uav/waypoints/params_loaded` (Float64MultiArray)
+- Publish: `uav/plan_maker/points` (MarkerArray, spheres+arrows+numbers), `uav/plan_maker/trajectory` (Path), `uav/waypoints/input` (PoseArray), `uav/waypoints/params` (Float64MultiArray), `uav/experiment/record` (Bool)
+- Service clients: `uav/waypoint_manager/save_waypoints`, `uav/waypoint_manager/load_waypoints`, `uav/navigator/command`
 
 **All parameters** from `rviz_waypoint_panel/config/panel_config.yaml`.
 

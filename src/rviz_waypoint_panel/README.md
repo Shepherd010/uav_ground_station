@@ -17,8 +17,10 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 └────────────────────────────────────────────────────────┘
 
 ┌─ 航点规划 ─────────────────────────────────────────────┐
-│ [📂 加载] [🔗 连接] [💾 保存] [🗑 删除] [🧹 清除]         │
-│ 状态: CONNECTED | 5                                     │
+│ ① 打点 → ② 连线 → ③ 就绪 → ④ 执行                     │
+│ [████████████░░░░░░░░░░░░░░░░░]  4 步工作流进度条        │
+│ [📂 加载文件] [💾 保存文件] [🔗 连线] [📤 发布]           │
+│ [🗑 删除] [🧹 清空]        状态: 打点中 | 3              │
 └────────────────────────────────────────────────────────┘
 
 ┌─ 航点列表 ─────────────────────────────────────────────┐
@@ -30,8 +32,9 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 └────────────────────────────────────────────────────────┘
 
 ┌─ 飞行控制 ─────────────────────────────────────────────┐
-│ [▶ 开始任务] [⏸ 悬停] [🛬 降落]                         │
-│ [🏠 返航] [🔄 重置] [🛑 紧急停止]                        │
+│ [⏺ 开始录制] [▶ 开始任务]                                │
+│ [⏸ 悬停] [🛬 降落] [🏠 返航]                             │
+│ [🔄 重置] [🛑 紧急停止]                                   │
 └────────────────────────────────────────────────────────┘
 
 ┌─ 操作日志 ─────────────────────────────────────────────┐
@@ -44,10 +47,11 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 
 | 按钮 | 导航命令 | 效果 | 可用条件 |
 |------|---------|------|---------|
-| ▶ 开始任务 | START | 发布航点 → 解锁 → 起飞 → 依次执行 → 降落 | SAVED 阶段 |
-| ⏸ 悬停 | PAUSE | 保持当前位置悬停，不降落 | NAVIGATING 阶段 |
+| ⏺ 开始录制 | (发布 Bool) | 手动切换 experiment_recorder 录制状态 | navigator 运行 |
+| ▶ 开始任务 | START | 发送 START 到 navigator（航点已发布） | 就绪 阶段 |
+| ⏸ 悬停 | PAUSE | 保持当前位置悬停，不降落 | 执行中 阶段 |
 | 🛬 降落 | LAND | 立即结束任务，AUTO.LAND 着陆 | 飞行中 |
-| 🏠 返航 | RETURN_TO_HOME | 返回起飞点（TAKEOFF 记录的 Home）着陆 | NAVIGATING/HOVERING |
+| 🏠 返航 | RETURN_TO_HOME | 返回起飞点着陆 | 执行中 |
 | 🔄 重置 | RESET | EMERGENCY/LANDED → IDLE | 任意 |
 | 🛑 紧急停止 | EMERGENCY_STOP | 弹窗确认 → AUTO.LAND 紧急着陆 | 始终可用 |
 
@@ -92,53 +96,55 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 1. 打点（2D Nav Goal 工具 / 手动输入表格）
    └→ plan_maker_points_ 填充 → publishPlanMakerMarkers() → RViz 显示橙色球+箭头+编号
 
-2. 🔗 连接（≥2 个点）
+2. 🔗 连线（≥2 个点）
    └→ publishPlanTrajectory() → RViz 显示黄色轨迹线
-   └→ 状态: PLANNING → CONNECTED
+   └→ 状态: 打点中 → 已连线
 
-3. 💾 保存
+3. 📤 发布
    └→ savePlanWaypoints()
-   └→ 发布 PoseArray → uav/waypoints/input → waypoint_manager
-   └→ 发布 Float64MultiArray → uav/waypoints/params
-   └→ waypoint_manager 验证后 publish 到 uav/waypoints/current → navigator 收到
-   └→ 状态: CONNECTED → SAVED
-   └→ navigator 确认后自动标记（receiveNavStatus 中检查 total_waypoints 匹配）
+   └→ 发布 PoseArray → uav/waypoints/input → waypoint_manager 验证
+   └→ waypoint_manager 转发 → uav/waypoints/current → navigator 收到
+   └→ navigator 确认后自动标记（receiveNavStatus 中 total_waypoints 匹配）
+   └→ 状态: 已连线 → 就绪
 
-4. ▶ 开始任务
-   └→ startMission() → publishWaypoints() + nav_command START
+4. 💾 保存文件（可选，随时可用）
+   └→ saveWaypoints() → publishWaypoints() 同步 → save service → XML 文件
+
+5. ▶ 开始任务
+   └→ startMission() → nav_command START
    └→ navigator 进入 PRE_FLIGHT → ... → NAVIGATING
-   └→ 状态: SAVED → NAVIGATING
+   └→ 状态: 就绪 → 执行中
 
-5. 执行中
-   └→ RViz: 已到达=绿色球, 当前目标=橙色放大球+箭头, 待飞行=蓝色球
+6. 执行中
+   └→ RViz: 已到达=绿色球, 当前目标=橙色放大球, 待飞行=蓝色球
    └→ 进度条 + 航点计数实时更新
 ```
 
 ### 加载已有航点执行
 
 ```
-📂 加载
+📂 加载文件
 └→ loadWaypoints()
-└→ load_waypoints_client CALL → waypoint_manager 返回 PoseArray
+└→ load_waypoints client CALL → waypoint_manager 返回 PoseArray
 └→ 填充 plan_maker_points_ + 表格
 └→ publishPlanMakerMarkers() → RViz 显示
-└→ 自动连接轨迹 (≥2 点)
-└→ 状态: CONNECTED
-→ 然后继续 💾 保存 → ▶ 发布 → 执行
-```
+└→ 自动连接轨迹 (≥2 点) + 等待 navigator 确认
+└→ 状态: 已连线 → 自动 就绪（跳过手动发布）
+→ 直接点 ▶ 开始任务 执行
 
 ## 飞行控制按钮
 
 | 面板按钮 | 等价命令 | 说明 |
 |---------|---------|------|
-| ▶ 开始任务 | `rosservice call /uav/navigator/command "{command: 'START'}"` | 发布航点并启动导航 |
+| ⏺ 开始录制 | `rostopic pub /uav/experiment/record std_msgs/Bool "data: true"` | 手动开始录制，红色按钮 |
+| ▶ 开始任务 | `rosservice call /uav/navigator/command "{command: 'START'}"` | 启动导航 |
 | ⏸ 悬停 | `rosservice call /uav/navigator/command "{command: 'PAUSE'}"` | 保持当前位置悬停 |
 | 🛬 降落 | `rosservice call /uav/navigator/command "{command: 'LAND'}"` | 立即着陆 |
 | 🏠 返航 | `rosservice call /uav/navigator/command "{command: 'RETURN_TO_HOME'}"` | 返回起飞点着陆 |
 | 🔄 重置 | `rosservice call /uav/navigator/command "{command: 'RESET'}"` | EMERGENCY/LANDED→IDLE |
 | 🛑 紧急停止 | `rosservice call /uav/navigator/command "{command: 'EMERGENCY_STOP'}"` | 弹窗确认→紧急着陆 |
-| 💾 保存 | `rosservice call /uav/waypoint_manager/save_waypoints "..."` | 航点写入 XML |
-| 📂 加载 | `rosservice call /uav/waypoint_manager/load_waypoints "..."` | 从 XML 加载航点 |
+| 💾 保存文件 | `rosservice call /uav/waypoint_manager/save_waypoints "..."` | 航点写入 XML |
+| 📂 加载文件 | `rosservice call /uav/waypoint_manager/load_waypoints "..."` | 从 XML 加载航点 |
 
 ## Marker 可视化系统
 

@@ -4,6 +4,63 @@
 
 ---
 
+## [3.0.0] - 2026-07-28 - 面板 HMI 修复、录制脚本、数据流完整性
+
+### 面板 HMI 重构（waypoint_panel）
+
+**按钮语义修复（6 个关键问题）：**
+
+| 修复前 | 修复后 | 说明 |
+|--------|--------|------|
+| "💾 保存" 实际是发布 | "📤 发布" — 标签对齐实际行为 | 不再误导用户 |
+| 无 XML 保存按钮 | "💾 保存文件" — 调用 saveWaypoints() | 弹出文件对话框，写入 XML |
+| 加载后必须再点"发布" | 加载后自动等待 navigator 确认 → 就绪 | 少一步冗余操作 |
+| 开始任务重复发布航点 | 移除 publishWaypoints() 冗余调用 | navigator 已有最新数据 |
+| 两套 marker 系统并存 | 删除 legacy markWaypoint/republishMarkers（~80行死代码） | 清理后只有 MarkerArray 系统 |
+| publishPlanTask() 孤儿函数 | 删除头文件声明 | 从未实现，无调用者 |
+
+**新增功能：**
+- ⏺ **录制按钮** — 面板上手动开始/停止 rosbag 录制，发布 Bool 到 `uav/experiment/record`
+- 📊 **工作流进度条** — 4 步可视化：① 打点 → ② 连线 → ③ 就绪 → ④ 执行
+- ⏱ **auto-SAVED 超时保护** — navigator 5 秒无响应则提示用户检查 waypoint_manager
+
+**数据一致性修复（5 个问题）：**
+
+| 问题 | 修复 |
+|------|------|
+| savePlanWaypoints 双源读取（table + plan_maker） | 统一从 plan_maker_points_ 唯一数据源读取 |
+| deleteSelectedPlanPoint 无条件重置到 PLANNING | 条件判断：<2点→PLANNING，SAVED→CONNECTED |
+| deleteSelectedWaypoint 不更新 phase | 新增与 deletePlan 一致的 phase 回退逻辑 |
+| onTableChanged 编辑后不更新 phase | SAVED 状态下编辑自动回退到 CONNECTED |
+| moveWaypointUp/Down 移动后不更新 phase | SAVED 状态下移动自动回退到 CONNECTED |
+
+**死代码清理：**
+- ❌ `markWaypoint()` / `republishMarkers()` — 旧 marker 系统，无调用者
+- ❌ `publishPlanTask()` — 声明但从未实现
+- ❌ `plan_maker_dirty_` — 赋值但从未读取
+- ❌ `save_plan_button_` → 重命名为 `publish_button_`
+
+**中文界面优化：**
+- 阶段标签：PLANNING→打点中, CONNECTED→已连线, SAVED→就绪, NAVIGATING→执行中
+- 按钮标签全部中文化
+- 日志消息中文化
+
+### 综合录制脚本
+
+**新增 `scripts/record_bag.sh`：**
+- 子命令 `start/stop/status`
+- 录制全部话题（137 个）排除噪音（rosout/hil/debug/log_transfer 等 23 个）
+- 自动命名：`~/experiments/rosbag/flight_YYYY-MM-DD_HH-MM-SS/full_flight_*.bag`
+- PID 文件防重复启动，残留自动清理
+- SIGINT 优雅停止，bag 正确关闭
+- 覆盖：MAVROS 遥测（127话题中的120+）+ DLIO SLAM（7）+ Livox LiDAR（4）+ UAV 内部（13）+ MAVLink + TF
+
+### 编译验证
+- 全部 3 个活动包通过编译，0 错误 0 警告
+- rviz_waypoint_panel 重构后净变更 ~0 行（增删均衡）
+
+---
+
 ## [2.9.0] - 2026-07-17 - 面板 UI 重构、人机交互逻辑优化
 
 ### 面板 UI 重构（HMI 优化）

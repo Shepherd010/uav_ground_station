@@ -2,7 +2,7 @@
 
 面向 PX4 飞控的全自动航点导航地面站，基于 ROS Noetic + MAVROS + RViz。模块化设计，覆盖航点标注→规划→验证→执行→监控→记录的全流程。
 
-**版本：** v2.8.1 | **许可证：** MIT
+**版本：** v3.0.0 | **许可证：** MIT
 
 ---
 
@@ -20,8 +20,13 @@ cd /home/groundstation/catkin_ws_copy
 # 3. 可视化面板（本机，新终端）
 ./scripts/start_rviz.sh
 
-# 4. 执行任务
+# 4. 执行任务（或手动录制）
 ./scripts/start_mission.sh /home/groundstation/waypoints.xml
+
+# 手动录制（随时起停，不依赖自动录制触发器）
+./scripts/record_bag.sh start
+./scripts/record_bag.sh status
+./scripts/record_bag.sh stop
 ```
 
 ## 系统架构
@@ -134,7 +139,7 @@ receiveGoal()
   └─→ [🔗连接] → publishPlanTrajectory()
         └→ /uav/plan_maker/trajectory (Path) → RViz 黄色轨迹线
 
-[💾保存] → savePlanWaypoints()
+[📤发布] → savePlanWaypoints()
   ├─→ waypoint_pub_.publish() ──→ uav/waypoints/input ──→ waypointsCallback()
   │     (PoseArray, latched)                                │
   │                                                        ├→ validateWaypoints()
@@ -151,7 +156,7 @@ receiveGoal()
   │                                                            └→ uav/waypoints/params_loaded ──→ panel.receiveWaypointParams()
   │                                                                (更新表格 hover/speed 列)
 
-[▶发布] → publishPlanTask() → nav_command START
+[▶开始任务] → startMission() → nav_command START
   └→ /uav/navigator/command ──→ navigator.commandCallback()
                                    │
                                    ├→ PRE_FLIGHT → ARMING → TAKEOFF
@@ -161,17 +166,21 @@ receiveGoal()
                                        └→ /uav/navigator/status ──→ panel.receiveNavStatus()
                                            (状态显示 + 进度条 + marker 颜色编码)
 
+[💾保存文件] → saveWaypoints()
+  ├─→ publishWaypoints() → waypoint_manager 同步最新数据
+  └─→ save_waypoints srv CALL → waypoint_manager.saveWaypointsCallback() → XML 文件
+
 实时回显:
   /mavros/state ────────────────→ panel MAVROS 连接/解锁/模式显示
   /mavros/local_position/odom ──→ panel 位置显示
   /uav/trajectory/real ─────────→ RViz 红色实际轨迹 (FIFO ≤500 点)
 
 加载已有航点:
-  [📂加载] → loadWaypoints()
+  [📂加载文件] → loadWaypoints()
     └→ load_waypoints srv CALL → waypoint_manager.loadWaypointsCallback()
         ←── response.waypoints (PoseArray 直接返回，不用 waitForMessage)
     └→ 填充 plan_maker_points_ + 表格 + publishPlanMakerMarkers()
-    └→ 自动连接轨迹 (≥2 点)
+    └→ 自动连接轨迹 (≥2 点) + 等待 navigator 确认 → 自动就绪
 ```
 
 ## 话题速查
@@ -192,6 +201,7 @@ receiveGoal()
 | `uav/config/reload` | String | panel→navigator+safety | 按需 | 配置热重载通知 |
 | `uav/config/loaded` | String | panel→logger | 按需 | 配置加载成功事件 |
 | `uav/experiment/metrics` | ExperimentMetrics | navigator→recorder | 10Hz | 偏差等实验指标 |
+| `uav/experiment/record` | Bool | panel→recorder | 按需(latched) | 手动录制控制 |
 | `mavros/state` | State | MAVROS→* | ~10Hz | FCU 连接/解锁/模式 |
 | `mavros/local_position/odom` | Odometry | MAVROS→* | ~30Hz | 位置/速度 |
 | `mavros/setpoint_position/local` | PoseStamped | navigator→MAVROS | 20Hz | OFFBOARD 位置指令 |

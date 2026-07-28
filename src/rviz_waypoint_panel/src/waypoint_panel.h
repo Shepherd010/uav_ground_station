@@ -38,8 +38,9 @@
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <mavros_msgs/State.h>
-#include <std_msgs/String.h>
+#include <std_msgs/Bool.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/String.h>
 
 #include "uav_navigator/NavigatorStatus.h"
 #include "uav_navigator/NavigatorCommand.h"
@@ -88,16 +89,18 @@ public Q_SLOTS:
     void connectPlanTrajectory();
     void deleteSelectedPlanPoint();
     void clearPlanPoints();
-    void savePlanWaypoints();
-    void publishPlanTask();
+    void savePlanWaypoints();    // 发布航点到 navigator（原名"保存"）
 
     // ===== 飞行控制 =====
-    void startMission();        // ▶ 开始任务：发布航点 + START
+    void startMission();        // ▶ 开始任务
     void hoverInPlace();        // ⏸ 悬停：PAUSE，保持当前位置
     void landNow();             // 🛬 降落：LAND，立即着陆
     void returnToHome();        // 🏠 返航：返回起飞点并着陆
     void resetNavigator();      // 🔄 重置：EMERGENCY/LANDED → IDLE
     void emergencyStop();       // 🛑 紧急停止
+
+    // ===== 录制控制 =====
+    void toggleRecording();     // ⏺/⏹ 切换录制状态
 
     // ===== 系统 =====
     void checkNodeStatus();
@@ -114,9 +117,7 @@ public Q_SLOTS:
 
 protected:
     // Marker
-    void markWaypoint(const geometry_msgs::PoseStamped &pose, int id);
     void clearMarkers();
-    void republishMarkers();
 
     // Plan Maker
     enum PlanMakerPhase { PLANNING, CONNECTED, SAVED, NAVIGATING };
@@ -124,11 +125,12 @@ protected:
     void publishPlanMakerMarkers();
     void publishPlanTrajectory();
     void updatePlanMakerStatus();
+    void updateWorkflowProgress();
     void setPlanMakerPhase(PlanMakerPhase phase);
     QString phaseToString(PlanMakerPhase phase);
 
     // 表格
-    geometry_msgs::PoseArray readWaypointsFromTable();
+    geometry_msgs::PoseArray getWaypointsFromPlan();
     void updateStatusDisplay(const uav_navigator::NavigatorStatus &status);
 
     // 日志
@@ -158,6 +160,7 @@ protected:
     ros::ServiceClient save_waypoints_client_;
     ros::ServiceClient load_waypoints_client_;
     ros::ServiceClient nav_command_client_;
+    ros::Publisher record_control_pub_;     // 录制控制: uav/experiment/record
 
     // 配置
     struct Config {
@@ -221,7 +224,6 @@ protected:
     std::vector<geometry_msgs::PoseStamped> plan_maker_points_;
     PlanMakerPhase plan_maker_phase_;
     int plan_maker_selected_index_;
-    bool plan_maker_dirty_;
 
     // Per-waypoint parameters
     std::vector<double> waypoint_hover_times_;
@@ -232,6 +234,12 @@ protected:
     // Navigator running flag
     bool navigator_running_;
 
+    // 录制状态
+    bool is_recording_;
+
+    // auto-SAVED 确认计时（防止 navigator 无响应时永久卡在 CONNECTED）
+    ros::Time confirm_request_time_;
+
     // Marker 刷新计数器（替代 static 局部变量，每 N 次 spin 刷新一次 marker）
     int refresh_counter_;
 
@@ -240,6 +248,8 @@ protected:
 
     // ===== 航点规划状态显示 =====
     QLabel *plan_maker_status_label_;
+    QProgressBar *workflow_progress_;    // 4 步工作流进度条
+    QLabel *workflow_label_;             // 工作流步骤文字
 
     // ===== 配置显示区域 =====
     QGroupBox *config_group_;
@@ -263,6 +273,7 @@ protected:
 
     // ===== 飞行控制按钮 =====
     QPushButton *start_mission_button_;   // ▶ 开始任务
+    QPushButton *record_button_;          // ⏺/⏹ 开始/停止录制
     QPushButton *hover_button_;           // ⏸ 悬停
     QPushButton *land_button_;            // 🛬 降落
     QPushButton *rth_button_;             // 🏠 返航
@@ -270,11 +281,12 @@ protected:
     QPushButton *emergency_button_;       // 🛑 紧急停止
 
     // ===== 航点规划按钮 =====
-    QPushButton *load_button_;
-    QPushButton *connect_plan_button_;
-    QPushButton *save_plan_button_;
-    QPushButton *delete_plan_point_button_;
-    QPushButton *clear_plan_button_;
+    QPushButton *load_button_;            // 📂 加载文件
+    QPushButton *save_file_button_;       // 💾 保存到文件
+    QPushButton *connect_plan_button_;    // 🔗 连线
+    QPushButton *publish_button_;         // 📤 发布航点（原 save_plan_button_）
+    QPushButton *delete_plan_point_button_;  // 🗑 删除
+    QPushButton *clear_plan_button_;      // 🧹 清空
 
     // ===== 航点列表操作按钮 =====
     QPushButton *delete_button_;
