@@ -2,26 +2,44 @@
 
 面向 PX4 飞控的全自动航点导航地面站，基于 ROS Noetic + MAVROS + RViz。模块化设计，覆盖航点标注→规划→验证→执行→监控→记录的全流程。
 
-**版本：** v3.1.0 | **许可证：** MIT
+**版本：** v3.2.0 | **许可证：** MIT
 
 ---
+
+## 首次使用
+
+```bash
+# 1. 克隆到任意目录
+git clone <repo-url> ~/uav_ground_station
+
+# 2. 安装依赖（Ubuntu 20.04 + ROS Noetic）
+sudo apt install python3-catkin-tools ros-noetic-mavros ros-noetic-mavros-extras
+
+# 3. 构建
+cd ~/uav_ground_station
+catkin build
+source devel/setup.bash
+
+# 4. 所有路径默认基于 $HOME，无需修改即可运行
+#    如需自定义，编辑 config.yaml 中的路径参数
+```
 
 ## 快速开始
 
 ```bash
 # 1. 机载端（SSH 到无人机）
-ssh uav@192.168.31.180
+ssh uav@<drone-ip>
 ~/uav_scripts/start_full.sh
 
 # 2. 地面站核心（本机）
-cd /home/groundstation/uav_ground_station
+cd ~/uav_ground_station
 ./scripts/start_ground_station.sh
 
 # 3. 可视化面板（本机，新终端）
 ./scripts/start_rviz.sh
 
 # 4. 执行任务（或手动录制）
-./scripts/start_mission.sh /home/groundstation/waypoints.xml
+./scripts/start_mission.sh ~/waypoints.xml
 
 # 手动录制（随时起停，不依赖自动录制触发器）
 ./scripts/record_bag.sh start

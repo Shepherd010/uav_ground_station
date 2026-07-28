@@ -215,7 +215,7 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 | `panel/marker/arrow_scale_x` | 0.6 | 方向箭头长度 |
 | `panel/marker/number_scale` | 0.8 | 数字标签大小 |
 | `panel/spin_timer_ms` | 100 | UI 刷新间隔 (ms) |
-| `panel/default_config_path` | `/home/groundstation/uav_ground_station/config.yaml` | 默认配置路径 |
+| `panel/default_config_path` | (自动检测) | 默认配置路径，运行时可自动检测 |
 
 ## 依赖
 

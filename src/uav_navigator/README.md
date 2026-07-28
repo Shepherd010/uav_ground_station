@@ -167,7 +167,7 @@ rostopic echo /uav/navigator/status
 ```bash
 # 修改 config.yaml 后在 RViz 面板点击"从文件加载"
 # 或命令行：
-rosparam load /home/groundstation/uav_ground_station/config.yaml
+rosparam load ~/uav_ground_station/config.yaml
 rostopic pub /uav/config/reload std_msgs/String "data: 'manual reload'"
 ```
 

@@ -49,10 +49,10 @@ services:
   clear: "uav/waypoint_manager/clear_waypoints"
 
 paths:
-  default_save: "/home/groundstation/waypoints.xml"
-  default_load: "/home/groundstation/waypoints.xml"
+  default_save: "~/waypoints.xml"
+  default_load: "~/waypoints.xml"
   default_frame_id: "map"
-  allowed_base: "/home/groundstation"  # 路径遍历保护允许的基路径
+  allowed_base: "~"  # 路径遍历保护允许的基路径，~ 展开为 $HOME
 
 # ============================================================================
 # 第二类：安全与阈值参数
@@ -100,16 +100,6 @@ flight_defaults:
   offboard_pre_pub_count: 100    # OFFBOARD 预发布数量
   landing_height_threshold: 0.15 # 降落完成高度阈值（米）
 
-# 兼容旧代码的 flight 节（与 flight_defaults 保持同步）
-flight:
-  takeoff_height: 1.0
-  takeoff_timeout: 20.0
-  hover_duration: 5.0
-  travel_speed: 2.0
-  setpoint_rate: 20.0
-  offboard_pre_pub_count: 100
-  landing_height_threshold: 0.15
-
 # ============================================================================
 # 第四类：导航精度参数
 # ============================================================================
@@ -132,7 +122,7 @@ publish_rate: 1.0
 # 第六类：RViz 面板可视化参数
 # ============================================================================
 panel:
-  default_config_path: "/home/groundstation/uav_ground_station/config.yaml"
+  default_config_path: ""  # 空字符串 = 运行时通过 ros::package::getPath 自动检测
 
   # 话题配置
   goal_topic: "move_base_simple/goal"
@@ -201,7 +191,7 @@ logger:
 # 第八类：实验记录配置
 # ============================================================================
 experiment:
-  output_dir: "/home/groundstation/experiments"
+  output_dir: "~/experiments"
   auto_record: true
   real_path_sample_interval: 0.1
   max_real_path_points: 500       # real_path 最大点数（FIFO），防止 RViz 卡顿（≥50）

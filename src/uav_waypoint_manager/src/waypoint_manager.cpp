@@ -20,6 +20,14 @@
 
 namespace uav_waypoint_manager {
 
+// 将 ~ 前缀路径展开为 $HOME，保证跨机器可移植
+static std::string resolveHome(const std::string& path) {
+    if (path.empty() || path[0] != '~') return path;
+    const char* home = std::getenv("HOME");
+    if (!home) return path;
+    return std::string(home) + path.substr(1);
+}
+
 // 路径安全检查：确保解析后的路径在允许的基础目录内
 static bool isPathSafe(const std::string& path, const std::string& allowed_base) {
     // 不允许空路径
@@ -103,7 +111,6 @@ private:
         double max_height;
         double min_height;
         double duplicate_threshold;  // 重复航点判定阈值（米），默认 0.01
-        double publish_rate;
     } config_;
 
     // 方法
@@ -162,26 +169,24 @@ void WaypointManager::loadConfig() {
     global_nh.param<std::string>("services/save", config_.save_service, "uav/waypoint_manager/save_waypoints");
     global_nh.param<std::string>("services/clear", config_.clear_service, "uav/waypoint_manager/clear_waypoints");
 
-    global_nh.param<std::string>("paths/default_save", config_.default_save_path, "/home/groundstation/waypoints.xml");
-    global_nh.param<std::string>("paths/default_load", config_.default_load_path, "/home/groundstation/waypoints.xml");
-    global_nh.param<std::string>("paths/allowed_base", config_.allowed_base_path, "/home/groundstation");
+    global_nh.param<std::string>("paths/default_save", config_.default_save_path, "~/waypoints.xml");
+    global_nh.param<std::string>("paths/default_load", config_.default_load_path, "~/waypoints.xml");
+    global_nh.param<std::string>("paths/allowed_base", config_.allowed_base_path, "~");
     global_nh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
+
+    // 展开 ~ 为 $HOME
+    config_.default_save_path = resolveHome(config_.default_save_path);
+    config_.default_load_path = resolveHome(config_.default_load_path);
+    config_.allowed_base_path = resolveHome(config_.allowed_base_path);
 
     global_nh.param<double>("validation/min_waypoint_spacing", config_.min_waypoint_spacing, 0.3);
     global_nh.param<double>("validation/max_height", config_.max_height, 50.0);
     global_nh.param<double>("validation/min_height", config_.min_height, 0.5);
     global_nh.param<double>("validation/duplicate_threshold", config_.duplicate_threshold, 0.01);
-    global_nh.param<double>("publish_rate", config_.publish_rate, 1.0);
 
     // 从全局命名空间读取默认飞行参数（用于 per-waypoint 回退）
     global_nh.param<double>("flight_defaults/hover_duration", default_hover_time_, 5.0);
     global_nh.param<double>("flight_defaults/travel_speed", default_speed_, 2.0);
-    // 向后兼容：如果 flight_defaults 未设置，回退到 flight 节
-    // TODO(v4.0): 删除 flight 节，统一使用 flight_defaults
-    if (!global_nh.hasParam("flight_defaults/hover_duration")) {
-        global_nh.param<double>("flight/hover_duration", default_hover_time_, 5.0);
-        global_nh.param<double>("flight/travel_speed", default_speed_, 2.0);
-    }
 
     ROS_INFO("[WaypointManager] Configuration:");
     ROS_INFO("  - default save path: %s", config_.default_save_path.c_str());

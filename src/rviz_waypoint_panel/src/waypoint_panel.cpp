@@ -26,6 +26,14 @@
 
 namespace rviz_waypoint_panel {
 
+// 将 ~ 前缀路径展开为 $HOME，保证跨机器可移植
+static std::string resolveHome(const std::string& path) {
+    if (path.empty() || path[0] != '~') return path;
+    const char* home = std::getenv("HOME");
+    if (!home) return path;
+    return std::string(home) + path.substr(1);
+}
+
 // ========== 构造函数 ==========
 WaypointPanel::WaypointPanel(QWidget *parent)
     : rviz::Panel(parent), nh_(), max_num_goal_(10), current_waypoint_count_(0),
@@ -397,28 +405,36 @@ void WaypointPanel::loadConfig() {
     pnh.param<double>("panel/marker/number_offset_z", config_.number_offset_z, 0.6);
     pnh.param<int>("panel/table/default_max_goals", config_.default_max_goals, 10);
     pnh.param<int>("panel/spin_timer_ms", config_.spin_timer_ms, 100);
-    pnh.param<std::string>("panel/default_config_path", config_.default_config_path, "/home/groundstation/uav_ground_station/config.yaml");
+    pnh.param<std::string>("panel/default_config_path", config_.default_config_path, "");
     pnh.param<std::string>("topics/config_loaded_topic", config_.config_loaded_topic, "uav/config/loaded");
     pnh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
     pnh.param<std::string>("experiment/record_control_topic", config_.record_control_topic, "uav/experiment/record");
     pnh.param<std::string>("panel/waypoint_params_input_topic", config_.waypoint_params_input_topic, "uav/waypoints/params");
     pnh.param<std::string>("panel/waypoint_params_loaded_topic", config_.waypoint_params_loaded_topic, "uav/waypoints/params_loaded");
 
-    // 文件路径
-    pnh.param<std::string>("paths/default_save", config_.default_save_path, "/home/groundstation/waypoints.xml");
-    pnh.param<std::string>("paths/default_load", config_.default_load_path, "/home/groundstation/waypoints.xml");
+    // 文件路径 — 默认值使用 ~ 前缀以支持跨机器移植
+    pnh.param<std::string>("paths/default_save", config_.default_save_path, "~/waypoints.xml");
+    pnh.param<std::string>("paths/default_load", config_.default_load_path, "~/waypoints.xml");
     pnh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
+
+    // 展开 ~ 为 $HOME
+    config_.default_save_path = resolveHome(config_.default_save_path);
+    config_.default_load_path = resolveHome(config_.default_load_path);
+
+    // 如果未显式配置 default_config_path，通过 ROS 包路径自动检测
+    if (config_.default_config_path.empty()) {
+        std::string pkg_path = ros::package::getPath("uav_navigator");
+        if (!pkg_path.empty()) {
+            config_.default_config_path = pkg_path + "/../../config.yaml";
+        }
+    } else {
+        config_.default_config_path = resolveHome(config_.default_config_path);
+    }
 
     // 从全局命名空间读取默认飞行参数
     ros::NodeHandle global_nh;
     global_nh.param<double>("flight_defaults/hover_duration", default_hover_time_, 5.0);
     global_nh.param<double>("flight_defaults/travel_speed", default_speed_, 2.0);
-    // 向后兼容：如果 flight_defaults 未设置，回退到 flight 节
-    // TODO(v4.0): 删除 flight 节，统一使用 flight_defaults
-    if (!global_nh.hasParam("flight_defaults/hover_duration")) {
-        global_nh.param<double>("flight/hover_duration", default_hover_time_, 5.0);
-        global_nh.param<double>("flight/travel_speed", default_speed_, 2.0);
-    }
 
     max_num_goal_ = config_.default_max_goals;
 }

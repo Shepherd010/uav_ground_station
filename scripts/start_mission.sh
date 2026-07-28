@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(dirname "$SCRIPT_DIR")"
 
-WAYPOINT_FILE="${1:-/home/groundstation/waypoints.xml}"
+WAYPOINT_FILE="${1:-$HOME/waypoints.xml}"
 
 # Use the same ROS master as the ground station core
 export ROS_MASTER_URI="${ROS_MASTER_URI:-http://localhost:11311}"

@@ -158,7 +158,12 @@ void ExperimentRecorder::loadConfig() {
     global_nh.param<std::string>("experiment/planned_path_topic", config_.planned_path_topic, "uav/trajectory/planned");
     global_nh.param<std::string>("experiment/real_path_topic", config_.real_path_topic, "uav/trajectory/real");
     global_nh.param<std::string>("experiment/record_control_topic", config_.record_control_topic, "uav/experiment/record");
-    global_nh.param<std::string>("experiment/output_dir", config_.output_dir, "/home/groundstation/experiments");
+    global_nh.param<std::string>("experiment/output_dir", config_.output_dir, "~/experiments");
+    // 展开 ~ 为 $HOME
+    if (!config_.output_dir.empty() && config_.output_dir[0] == '~') {
+        const char* home = std::getenv("HOME");
+        if (home) config_.output_dir = std::string(home) + config_.output_dir.substr(1);
+    }
     global_nh.param<bool>("experiment/auto_record", config_.auto_record, true);
     auto_record_ = config_.auto_record;
 }

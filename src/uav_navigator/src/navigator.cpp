@@ -168,7 +168,6 @@ private:
         // 航点参数
         double reach_threshold_xy;
         double reach_threshold_z;
-        double min_waypoint_spacing;
 
         // 模式切换参数
         double offboard_timeout;
@@ -180,12 +179,9 @@ private:
 
         // 安全参数
         double max_height_limit;
-        double communication_timeout;
 
         // OFFBOARD 安全参数
         double min_setpoint_rate_hz;
-        double setpoint_timeout_warn;
-        double setpoint_timeout_emergency;
         double mode_mismatch_tolerance;
         double position_jump_distance;
         double position_jump_window;
@@ -312,28 +308,17 @@ void Navigator::loadConfig() {
     global_nh.param<std::string>("topics/navigator_command", config_.navigator_command_service, "uav/navigator/command");
     global_nh.param<std::string>("topics/safety_alert", config_.safety_alert_topic, "uav/safety/alert");
 
-    // 飞行参数：优先从 flight_defaults 读取（与 waypoint_manager 保持一致），
-    // 回退到 flight（兼容旧版 config.yaml）
+    // 飞行参数
     global_nh.param<double>("flight_defaults/takeoff_height", config_.takeoff_height, 1.0);
     global_nh.param<double>("flight_defaults/hover_duration", config_.hover_duration, 2.0);
     global_nh.param<double>("flight_defaults/setpoint_rate", config_.setpoint_rate, 20.0);
     global_nh.param<int>("flight_defaults/offboard_pre_pub_count", config_.offboard_pre_pub_count, 100);
     global_nh.param<double>("flight_defaults/landing_height_threshold", config_.landing_height_threshold, 0.15);
     global_nh.param<double>("flight_defaults/takeoff_timeout", config_.takeoff_timeout, 20.0);
-    // 向后兼容：如果 flight_defaults 未设置，回退到 flight 节
-    if (!global_nh.hasParam("flight_defaults/takeoff_height")) {
-        global_nh.param<double>("flight/takeoff_height", config_.takeoff_height, 1.0);
-        global_nh.param<double>("flight/hover_duration", config_.hover_duration, 2.0);
-        global_nh.param<double>("flight/setpoint_rate", config_.setpoint_rate, 20.0);
-        global_nh.param<int>("flight/offboard_pre_pub_count", config_.offboard_pre_pub_count, 100);
-        global_nh.param<double>("flight/landing_height_threshold", config_.landing_height_threshold, 0.15);
-        global_nh.param<double>("flight/takeoff_timeout", config_.takeoff_timeout, 20.0);
-    }
 
     // 航点参数
     global_nh.param<double>("waypoint/reach_threshold_xy", config_.reach_threshold_xy, 0.15);
     global_nh.param<double>("waypoint/reach_threshold_z", config_.reach_threshold_z, 0.2);
-    global_nh.param<double>("validation/min_waypoint_spacing", config_.min_waypoint_spacing, 0.3);
 
     // 模式切换参数
     global_nh.param<double>("mode/offboard_timeout", config_.offboard_timeout, 8.0);
@@ -358,12 +343,9 @@ void Navigator::loadConfig() {
 
     // 安全参数
     global_nh.param<double>("safety/max_height_limit", config_.max_height_limit, 10.0);
-    global_nh.param<double>("safety/communication_timeout", config_.communication_timeout, 5.0);
 
     // OFFBOARD 安全参数
     global_nh.param<double>("offboard_safety/min_setpoint_rate_hz", config_.min_setpoint_rate_hz, 10.0);
-    global_nh.param<double>("offboard_safety/setpoint_timeout_warn", config_.setpoint_timeout_warn, 0.5);
-    global_nh.param<double>("offboard_safety/setpoint_timeout_emergency", config_.setpoint_timeout_emergency, 1.0);
     global_nh.param<double>("offboard_safety/mode_mismatch_tolerance", config_.mode_mismatch_tolerance, 2.0);
     global_nh.param<double>("position_safety/max_jump_distance", config_.position_jump_distance, 2.0);
     global_nh.param<double>("position_safety/jump_window", config_.position_jump_window, 0.1);

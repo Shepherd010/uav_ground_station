@@ -102,17 +102,17 @@
 
 XML 文件读写受路径遍历保护：
 - 禁止包含 `..` 的相对路径
-- 使用 `realpath()` 解析后检查是否在 `/home/groundstation` 范围内
+- 使用 `realpath()` 解析后检查是否在 `$HOME` 范围内（可通过 `paths/allowed_base` 配置）
 - 加载失败时回滚到加载前的状态
 
 ## 命令行操作
 
 ```bash
 # 加载航点
-rosservice call /uav/waypoint_manager/load_waypoints "{file_path: '/home/groundstation/waypoints.xml'}"
+rosservice call /uav/waypoint_manager/load_waypoints "{file_path: '$HOME/waypoints.xml'}"
 
 # 保存航点
-rosservice call /uav/waypoint_manager/save_waypoints "{file_path: '/home/groundstation/waypoints.xml'}"
+rosservice call /uav/waypoint_manager/save_waypoints "{file_path: '$HOME/waypoints.xml'}"
 
 # 清除航点
 rosservice call /uav/waypoint_manager/clear_waypoints
@@ -132,8 +132,9 @@ rostopic echo /uav/waypoints/current
 | `validation/max_height` | 2.0 | 建议最大高度 (m) |
 | `validation/min_height` | 0.5 | 建议最小高度 (m) |
 | `publish_rate` | 1.0 | 发布频率 (Hz) |
-| `paths/default_save` | `/home/groundstation/waypoints.xml` | 默认保存路径 |
-| `paths/default_load` | `/home/groundstation/waypoints.xml` | 默认加载路径 |
+| `paths/default_save` | `~/waypoints.xml` | 默认保存路径（~ 展开为 $HOME） |
+| `paths/default_load` | `~/waypoints.xml` | 默认加载路径 |
+| `paths/allowed_base` | `~` | 路径遍历保护基路径 |
 | `flight_defaults/hover_duration` | 5.0 | 全局默认悬停时间 (s) |
 | `flight_defaults/travel_speed` | 2.0 | 全局默认飞行速度 (m/s) |
 

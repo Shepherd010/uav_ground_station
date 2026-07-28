@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a **ROS (Robot Operating System) catkin workspace** (Noetic, catkin_tools v0.9.4) for a UAV ground station that controls PX4-based drones via MAVROS. The system is split into two responsibilities:
 
 1. **Ground station (this workspace)** — waypoint annotation, mission control, navigator state machine, safety monitoring, and RViz visualization.
-2. **Onboard computer (drone)** — DLIO SLAM + MAVROS bridge. This is started by the user via `~/uav_scripts/start_full.sh` on the onboard computer (`uav@192.168.31.180`).
+2. **Onboard computer (drone)** — DLIO SLAM + MAVROS bridge. This is started by the user via `~/uav_scripts/start_full.sh` on the onboard computer (`uav@<drone-ip>`).
 
 **Active packages:**
 1. **`uav_navigator`** — State-machine-driven navigation core + safety monitor + logger. Communicates with MAVROS to manage OFFBOARD mode, arming, takeoff, waypoint navigation, hovering, landing, and emergency states.
@@ -46,19 +46,19 @@ The old "phase 1/2/3/5" naming has been removed. Ground station operation uses t
 
 ### Onboard setup
 
-The onboard computer (`uav@192.168.31.180`) runs the SLAM + MAVROS link. The default environment on the onboard machine points its ROS master to the ground station:
+The onboard computer (`uav@<drone-ip>`) runs the SLAM + MAVROS link. The default environment on the onboard machine points its ROS master to the ground station:
 
 ```bash
-export ROS_MASTER_URI=http://192.168.31.30:11311
-export ROS_IP=192.168.31.180
-export ROS_HOSTNAME=192.168.31.180
+export ROS_MASTER_URI=http://<ground-station-ip>:11311
+export ROS_IP=<drone-ip>
+export ROS_HOSTNAME=<drone-ip>
 ```
 
 The ground station scripts default to:
 
 ```bash
-export ROS_MASTER_URI=http://192.168.31.30:11311
-export ROS_IP=192.168.31.30
+export ROS_MASTER_URI=http://localhost:11311
+export ROS_IP=127.0.0.1
 export ROS_HOSTNAME=groundstation
 ```
 
@@ -68,12 +68,12 @@ These defaults can be overridden by setting the environment variables before run
 
 1. **Start the onboard link** (on the drone, via SSH):
    ```bash
-   ssh uav@192.168.31.180
+   ssh uav@<drone-ip>
    ~/uav_scripts/start_full.sh
    ```
 2. **Start the ground station core** (on the ground station):
    ```bash
-   cd /home/groundstation/uav_ground_station
+   cd ~/uav_ground_station
    ./scripts/start_ground_station.sh
    ```
 3. **Open RViz for waypoint annotation** (on the ground station):
@@ -83,7 +83,7 @@ These defaults can be overridden by setting the environment variables before run
 4. **Create / load waypoints** in the RViz panel, save to XML.
 5. **Execute the mission**:
    ```bash
-   ./scripts/start_mission.sh /home/groundstation/waypoints.xml
+   ./scripts/start_mission.sh ~/waypoints.xml
    ```
 
 ## Package Details
@@ -145,10 +145,7 @@ These defaults can be overridden by setting the environment variables before run
 
 | File | Purpose |
 |------|---------|
-| `uav_navigator/config/navigator_config.yaml` | Namespace, topic names, flight params (takeoff height, hover duration, setpoint rate, thresholds), mode-switch timeouts, safety limits |
-| `uav_waypoint_manager/config/manager_config.yaml` | Topic names, file paths, waypoint validation thresholds |
-| `rviz_waypoint_panel/config/panel_config.yaml` | Goal/marker/status topics, marker colors/scales, table defaults, spin timer interval |
-| `rviz_waypoint_panel/config/uav_navigation.rviz` | RViz display configuration (also kept at repository root as `uav_navigation.rviz`) |
+| `config.yaml` | 统一配置文件（所有参数集中管理） |
 
 ## Service Commands
 
@@ -175,10 +172,10 @@ rosservice call /uav/navigator/command "{command: 'EMERGENCY_STOP'}"
 rosservice call /uav/navigator/command "{command: 'RESET'}"
 
 # Load waypoints from XML
-rosservice call /uav/waypoint_manager/load_waypoints "{file_path: '/home/groundstation/waypoints.xml'}"
+rosservice call /uav/waypoint_manager/load_waypoints "{file_path: '$HOME/waypoints.xml'}"
 
 # Save waypoints to XML
-rosservice call /uav/waypoint_manager/save_waypoints "{file_path: '/home/groundstation/waypoints.xml'}"
+rosservice call /uav/waypoint_manager/save_waypoints "{file_path: '$HOME/waypoints.xml'}"
 
 # Emergency stop via safety monitor
 rosservice call /uav/safety/emergency_stop

@@ -10,6 +10,7 @@
 #include <ros/ros.h>
 #include <ros/console.h>
 #include <ros/master.h>
+#include <ros/package.h>
 
 #include <rviz/panel.h>
 

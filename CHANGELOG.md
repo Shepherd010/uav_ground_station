@@ -4,6 +4,41 @@
 
 ---
 
+## [3.2.0] - 2026-07-28 - 通用性现代化：路径移植、向后兼容清理、GitHub 就绪
+
+### 路径通用化 — 全部路径基于 `$HOME` 自动适配
+- **C++ 代码：** 所有 `param<>()` 默认值改为 `~/...` 格式，新增 `resolveHome()` 函数在启动时展开 `~` 为 `$HOME`
+- **config.yaml：** 5 个路径参数全部改为可移植：`~/waypoints.xml`、`~/experiments`，`allowed_base: "~"`
+- **panel default_config_path：** 空值时通过 `ros::package::getPath("uav_navigator")` 自动检测
+- **Shell 脚本：** `start_mission.sh` 默认值 `$HOME/waypoints.xml`
+- **文档：** 全部 `.md` 文件中 `/home/groundstation/...` → `~` 相对路径，IP 地址改为 `<drone-ip>` 占位符
+
+### 删除 `flight` 向后兼容节
+- **config.yaml：** 删除 `flight:` 节（与 `flight_defaults` 完全重复的 7 个参数）
+- **navigator.cpp：** 删除 `flight_defaults/*` → `flight/*` 回退代码块（~15 行）
+- **waypoint_manager.cpp：** 删除相同回退 + `TODO(v4.0)` 注释
+- **waypoint_panel.cpp：** 删除相同回退 + `TODO(v4.0)` 注释
+- 全局 grep 确认：零 `flight/` 命名空间残余，零 "向后兼容" 注释
+
+### 死代码深度清理
+- **navigator.cpp Config：** 删除 4 个从未读取的字段（`min_waypoint_spacing`、`communication_timeout`、`setpoint_timeout_warn`、`setpoint_timeout_emergency`）及对应 param 加载
+- **waypoint_manager.cpp Config：** 删除 `publish_rate`（加载但从未使用）
+- **safety_monitor.cpp Config：** 之前已删除 `battery_threshold`
+- **config.yaml：** 删除 `publish_rate: 1.0` 孤立参数
+
+### GitHub 就绪
+- **新增 LICENSE 文件：** MIT 许可证
+- **README 首次使用指南：** 新增构建步骤、依赖安装、克隆说明
+- **CLAUDE.md：** 修正 3 个已删除配置文件的错误引用，路径全部通用化
+- **IP 地址通用化：** 所有 `192.168.31.x` → `localhost` 或 `<drone-ip>` 占位符
+
+### 编译验证
+- 全部 3 包通过编译：**0 错误，0 警告**
+- `bash -n scripts/*.sh` 全部通过
+- `grep -rn "/home/groundstation"` 非 CHANGELOG 文件零匹配
+
+---
+
 ## [3.1.0] - 2026-07-28 - 深度排查修复：数据流、死代码、配置统一、文档同步
 
 ### 数据流修复 (CRITICAL)
