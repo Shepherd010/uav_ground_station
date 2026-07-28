@@ -2,7 +2,7 @@
 
 面向 PX4 飞控的全自动航点导航地面站，基于 ROS Noetic + MAVROS + RViz。模块化设计，覆盖航点标注→规划→验证→执行→监控→记录的全流程。
 
-**版本：** v3.0.0 | **许可证：** MIT
+**版本：** v3.1.0 | **许可证：** MIT
 
 ---
 
@@ -14,7 +14,7 @@ ssh uav@192.168.31.180
 ~/uav_scripts/start_full.sh
 
 # 2. 地面站核心（本机）
-cd /home/groundstation/catkin_ws_copy
+cd /home/groundstation/uav_ground_station
 ./scripts/start_ground_station.sh
 
 # 3. 可视化面板（本机，新终端）
@@ -439,7 +439,7 @@ rostopic list
 ## 目录结构
 
 ```
-catkin_ws_copy/
+uav_ground_station/
 ├── config.yaml                        # ★ 统一配置文件（唯一可变参数来源）
 ├── CHANGELOG.md                       # 修改日志
 ├── CLAUDE.md                          # AI 助手指令
@@ -447,7 +447,8 @@ catkin_ws_copy/
 ├── scripts/                           # 启动脚本
 │   ├── start_ground_station.sh        # 启动地面站核心
 │   ├── start_rviz.sh                  # 启动 RViz + 面板
-│   └── start_mission.sh               # 加载航点并执行
+│   ├── start_mission.sh               # 加载航点并执行
+│   └── record_bag.sh                   # 手动录制 rosbag（起停状态）
 ├── src/
 │   ├── uav_navigator/                 # ★ 导航核心包
 │   │   ├── README.md                  # 包详细文档

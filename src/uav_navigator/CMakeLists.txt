@@ -80,10 +80,6 @@ install(TARGETS navigator safety_monitor logger experiment_recorder
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(DIRECTORY config/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
-)
-
 install(DIRECTORY launch/
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
 )

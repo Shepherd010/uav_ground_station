@@ -131,6 +131,7 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 └→ 自动连接轨迹 (≥2 点) + 等待 navigator 确认
 └→ 状态: 已连线 → 自动 就绪（跳过手动发布）
 → 直接点 ▶ 开始任务 执行
+```
 
 ## 飞行控制按钮
 
@@ -214,7 +215,7 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 | `panel/marker/arrow_scale_x` | 0.6 | 方向箭头长度 |
 | `panel/marker/number_scale` | 0.8 | 数字标签大小 |
 | `panel/spin_timer_ms` | 100 | UI 刷新间隔 (ms) |
-| `panel/default_config_path` | `/home/groundstation/catkin_ws/config.yaml` | 默认配置路径 |
+| `panel/default_config_path` | `/home/groundstation/uav_ground_station/config.yaml` | 默认配置路径 |
 
 ## 依赖
 

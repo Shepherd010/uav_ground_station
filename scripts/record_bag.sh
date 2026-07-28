@@ -170,7 +170,7 @@ cmd_start() {
         -x "$EXCLUDE_REGEX" \
         -o "${output_dir}/full_flight" \
         --quiet \
-        &>/dev/null &
+        2>"${output_dir}/rosbag_stderr.log" &
     local bag_pid=$!
 
     # 短暂等待确认启动成功

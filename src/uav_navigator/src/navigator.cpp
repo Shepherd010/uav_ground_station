@@ -333,7 +333,7 @@ void Navigator::loadConfig() {
     // 航点参数
     global_nh.param<double>("waypoint/reach_threshold_xy", config_.reach_threshold_xy, 0.15);
     global_nh.param<double>("waypoint/reach_threshold_z", config_.reach_threshold_z, 0.2);
-    global_nh.param<double>("waypoint/min_waypoint_spacing", config_.min_waypoint_spacing, 0.3);
+    global_nh.param<double>("validation/min_waypoint_spacing", config_.min_waypoint_spacing, 0.3);
 
     // 模式切换参数
     global_nh.param<double>("mode/offboard_timeout", config_.offboard_timeout, 8.0);
@@ -371,7 +371,7 @@ void Navigator::loadConfig() {
     // 轨迹/实验参数
     global_nh.param<std::string>("topics/planned_path", config_.planned_path_topic, "uav/trajectory/planned");
     global_nh.param<std::string>("topics/real_path", config_.real_path_topic, "uav/trajectory/real");
-    global_nh.param<std::string>("topics/metrics", config_.metrics_topic, "uav/experiment/metrics");
+    global_nh.param<std::string>("topics/metrics_topic", config_.metrics_topic, "uav/experiment/metrics");
     global_nh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
     global_nh.param<double>("experiment/real_path_sample_interval", config_.real_path_sample_interval, 0.1);
     global_nh.param<int>("experiment/max_real_path_points", config_.max_real_path_points, 500);
@@ -732,6 +732,9 @@ void Navigator::transitionState(State new_state) {
             } else if (has_odom_) {
                 setSetpoint(current_odom_.pose.pose);
                 ROS_WARN("[Navigator] No Home position recorded, hovering at current position");
+            } else {
+                ROS_ERROR("[Navigator] RETURNING with no home and no odom — landing immediately for safety");
+                transitionState(State::LANDING);
             }
             break;
         default:
@@ -1301,8 +1304,8 @@ void Navigator::buildPlannedPath() {
         ps.pose = pose;
         planned_path_.poses.push_back(ps);
     }
-    // 不再单独发布 planned_path，面板通过 uav/plan_maker/trajectory 已发布相同内容
-    // 保留本地数据用于 computePlanDeviation() 偏差计算
+    // 发布到 planned_path 话题供 experiment_recorder 记录
+    planned_path_pub_.publish(planned_path_);
 }
 
 void Navigator::appendRealPath() {

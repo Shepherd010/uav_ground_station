@@ -73,7 +73,7 @@ These defaults can be overridden by setting the environment variables before run
    ```
 2. **Start the ground station core** (on the ground station):
    ```bash
-   cd /home/groundstation/catkin_ws
+   cd /home/groundstation/uav_ground_station
    ./scripts/start_ground_station.sh
    ```
 3. **Open RViz for waypoint annotation** (on the ground station):

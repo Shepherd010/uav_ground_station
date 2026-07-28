@@ -4,6 +4,61 @@
 
 ---
 
+## [3.1.0] - 2026-07-28 - 深度排查修复：数据流、死代码、配置统一、文档同步
+
+### 数据流修复 (CRITICAL)
+
+- **【CRITICAL】修复 `topics/metrics` 参数名不匹配：** navigator 读取 `topics/metrics`，config.yaml 定义 `topics/metrics_topic`，导致 navigator 静默使用默认值 (C1)
+- **【CRITICAL】恢复 `planned_path` 发布链路：** navigator 恢复 `buildPlannedPath()` 后的 `planned_path_pub_.publish()`，experiment_recorder 的 bag 文件现在包含规划轨迹。此前 `planned_path_pub_` 创建但从不发布，`uav/trajectory/planned` 永久无数据 (C2)
+- **【CRITICAL】5 个飞行控制方法检查 `response.success`：** `hoverInPlace()`、`landNow()`、`returnToHome()`、`resetNavigator()`、`emergencyStop()` 现在检查 navigator service 返回值，失败时显示拒绝原因而非虚假成功 (C3)
+- **【CRITICAL】YAML 解析失败不再级联重载：** `loadConfigFromFile()` 中 yaml-cpp 异常捕获后立即 `return`，不触发后续 `loadConfig()`/`publishConfigLoaded()`/`config_reload` (C4)
+
+### 死代码清理 (MEDIUM)
+
+- **删除 `NodeStatus` 结构体 + `node_status_map_`：** 声明但从未在 `checkNodeStatus()` 中填充/读取
+- **删除未使用的 config 字段：** `trajectory_width`、`color_r/g/b/a`（legacy marker 参数）、`waypoint_current_topic`、`marker_id_counter_`
+- **删除无用 includes：** `<QCheckBox>`, `<QComboBox>`, `<QInputDialog>`, `<cstdio>`, `<QPainter>` — 从 header 和 cpp 中清理
+- **删除 `actionlib_msgs` 依赖：** 从 CMakeLists.txt（find_package + catkin_package）和 package.xml（build/build_export/exec）中移除
+- **修复 `deleteSelectedPlanPoint()` 重复 phase 转换：** 当走 `deleteSelectedWaypoint()` 分支时不再重复调用 `setPlanMakerPhase()` / `publishPlanMakerMarkers()`
+- **修复 else 分支同步清理：** `deleteSelectedPlanPoint()` 的 else 分支现在同步清理 `waypoint_hover_times_` 和 `waypoint_speeds_`
+
+### Config 统一 (MEDIUM)
+
+- **`record_control_pub_` 从 config 读取话题名：** 不再硬编码 `"uav/experiment/record"`，新增 `experiment/record_control_topic` 参数读取
+- **删除 `topics/record_control_topic` 重复定义：** 仅保留 `experiment/record_control_topic`
+- **统一 `min_waypoint_spacing`：** 删除 `waypoint/min_waypoint_spacing`，navigator 和 waypoint_manager 统一读取 `validation/min_waypoint_spacing`
+- **`flight` 向后兼容节同步：** waypoint_manager 和 panel 的 `loadConfig()` 增加 `flight_defaults/*` → `flight/*` 回退逻辑（与 navigator 一致），标注 TODO(v4.0) 删除
+- **删除 `battery_threshold` 死参数：** safety_monitor 移除该字段和加载代码，config.yaml 注释保留供未来实现
+- **删除死 config 参数：** `panel/table/columns`、`panel/display_params`
+- **新增 `paths/allowed_base` 配置：** 路径遍历保护基路径从硬编码改为可配置
+
+### 次要代码修复 (LOW)
+
+- **RETURNING 无 home 无 odom 时强制 LANDING：** 原静默失效，现加 `ROS_ERROR` + `transitionState(State::LANDING)` (H3)
+- **`stateToString()`/`stateToColor()` 使用命名常量：** `case 0:` → `case NavigatorStatus::STATE_IDLE:` 等 10 个状态
+- **XML 解析边界检查：** `<hover_time>` 和 `<speed>` 解析增加 waypoint 边界验证，防止跨 waypoint 读取
+- **rosbag 脚本 stderr 重定向到日志文件：** `&>/dev/null` → `2>"${output_dir}/rosbag_stderr.log"`
+
+### 构建修复 (HIGH)
+
+- **修复 `install(DIRECTORY config/)` 错误：** uav_navigator 和 uav_waypoint_manager 的 CMakeLists.txt 移除引用不存在的 config/ 目录
+- **新增 rviz_waypoint_panel launch 安装：** 添加 `install(DIRECTORY launch/)` 指令
+
+### 文档同步 (LOW)
+
+- **全局路径修正：** catkin_ws / catkin_ws_copy → uav_ground_station（7 处：README、CLAUDE.md、config.yaml、panel 代码、包 README）
+- **start_ground_station.sh 注释修正：** 删除矛盾的 IP 地址注释，默认 localhost
+- **README 补充：** scripts 列表添加 `record_bag.sh`
+- **rviz_waypoint_panel README markdown 结构修复：** 关闭未闭合代码块
+- **CHANGELOG 清理：** 删除无版本号孤悬内容，删除 "legacy" 错误引用
+
+### 编译验证
+
+- 全部 3 个活动包通过编译：**0 错误，0 警告**
+- 17 文件变更：+124 / -190 行（净删 66 行）
+
+---
+
 ## [3.0.0] - 2026-07-28 - 面板 HMI 修复、录制脚本、数据流完整性
 
 ### 面板 HMI 重构（waypoint_panel）
@@ -96,7 +151,7 @@
 
 ### 文档更新
 - 工作区 README 完全重写（架构图、数据流、话题速查、XML 格式、配置热重载）
-- 四包 README 新增（uav_navigator, uav_waypoint_manager, rviz_waypoint_panel, legacy）
+- 四包 README 新增（uav_navigator, uav_waypoint_manager, rviz_waypoint_panel）
 - 面板 README 更新 UI 布局图和按钮语义表
 
 ### 编译验证
@@ -608,74 +663,6 @@
 | Round 1 | 19 passed, 0 failed | `/home/groundstation/experiments/2026-06-30/experiment_001` |
 | Round 2 | 19 passed, 0 failed | `/home/groundstation/experiments/2026-06-30/experiment_002` |
 | Round 3 | 19 passed, 0 failed | `/home/groundstation/experiments/2026-06-30/experiment_003` |
-
----
-
-
-### 重构背景
-
-- 阶段编号（phase1/2/3/5）与实际部署流程不符：机载 DLIO + MAVROS 链路由用户在无人机上位机单独启动，地面站只负责"打点"和"导航"。
-- 旧的 `namespace: "uav1"` 会导致 MAVROS 话题被错误拼接，与机载 MAVROS 不兼容。
-- 旧的启动脚本缺少默认的 ROS 网络配置，无法直接用于真实飞行。
-
-### 变更内容
-
-#### 启动文件重构
-
-- **删除文件：**
-  - `src/uav_navigator/launch/phase1_ground_station.launch`
-  - `src/uav_navigator/launch/phase2_drone_core.launch`
-  - `src/uav_navigator/launch/phase3_visualization.launch`
-  - `src/uav_navigator/launch/phase5_execute_navigation.launch`
-- **新增文件：**
-  - `src/uav_navigator/launch/ground_station.launch` — 地面站核心节点（navigator + safety_monitor + waypoint_manager）
-  - `src/rviz_waypoint_panel/launch/rviz_ground_station.launch` — RViz + 航点面板
-- **影响范围：** uav_navigator、rviz_waypoint_panel
-- **验证方法：** `roslaunch uav_navigator ground_station.launch` 能正常启动三个节点
-
-#### 启动脚本重构
-
-- **删除文件：**
-  - `scripts/start_phase1.sh`
-  - `scripts/start_phase2.sh`
-  - `scripts/start_phase3.sh`
-  - `scripts/start_phase5.sh`
-- **新增文件：**
-  - `scripts/start_ground_station.sh` — 启动地面站核心，自动拉起 roscore
-  - `scripts/start_rviz.sh` — 启动可视化与航点面板
-  - `scripts/start_mission.sh <waypoint_file.xml>` — 加载航点并开始导航
-- **默认 ROS 网络配置：**
-  - 地面站：`ROS_MASTER_URI=http://192.168.31.30:11311`，`ROS_IP=192.168.31.30`
-  - 机载端：`ROS_MASTER_URI=http://192.168.31.30:11311`，`ROS_IP=192.168.31.180`
-- **影响范围：** scripts
-- **验证方法：** 运行新脚本，检查环境变量和节点列表
-
-#### 配置适配机载 MAVROS
-
-- **修改文件：** `src/uav_navigator/config/navigator_config.yaml`
-- **修改内容：**
-  - `namespace` 改为空字符串，避免话题拼接错误
-  - 话题名保持与机载 MAVROS 一致：`mavros/state`、`mavros/local_position/odom`、`mavros/setpoint_position/local`、`mavros/cmd/arming`、`mavros/set_mode`
-  - 删除对 `uav1/` 前缀的引用
-- **影响范围：** uav_navigator
-- **验证方法：** 机载 MAVROS 启动后，地面站节点能正确订阅/发布 MAVROS 话题
-
-#### RViz 配置归一化
-
-- **修改文件：**
-  - `src/rviz_waypoint_panel/config/uav_navigation.rviz`（新增）
-  - `uav_navigation.rviz`（同步更新）
-- **修改内容：**
-  - 修正 `Current Setpoint` 显示话题为 `/mavros/setpoint_position/local`
-  - launch 文件改用 `$(find rviz_waypoint_panel)/config/uav_navigation.rviz`
-- **影响范围：** rviz_waypoint_panel、项目根目录
-- **验证方法：** `roslaunch rviz_waypoint_panel rviz_ground_station.launch` 正常加载
-
-#### 文档同步
-
-- **修改文件：** `CLAUDE.md`
-- **修改内容：** 移除 phase 编号，更新启动命令、ROS 网络说明、使用流程
-- **影响范围：** 项目文档
 
 ---
 

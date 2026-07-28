@@ -98,6 +98,7 @@ private:
         std::string default_save_path;
         std::string default_load_path;
         std::string default_frame_id;
+        std::string allowed_base_path;     // 路径遍历保护允许的基路径
         double min_waypoint_spacing;
         double max_height;
         double min_height;
@@ -163,6 +164,7 @@ void WaypointManager::loadConfig() {
 
     global_nh.param<std::string>("paths/default_save", config_.default_save_path, "/home/groundstation/waypoints.xml");
     global_nh.param<std::string>("paths/default_load", config_.default_load_path, "/home/groundstation/waypoints.xml");
+    global_nh.param<std::string>("paths/allowed_base", config_.allowed_base_path, "/home/groundstation");
     global_nh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
 
     global_nh.param<double>("validation/min_waypoint_spacing", config_.min_waypoint_spacing, 0.3);
@@ -174,6 +176,12 @@ void WaypointManager::loadConfig() {
     // 从全局命名空间读取默认飞行参数（用于 per-waypoint 回退）
     global_nh.param<double>("flight_defaults/hover_duration", default_hover_time_, 5.0);
     global_nh.param<double>("flight_defaults/travel_speed", default_speed_, 2.0);
+    // 向后兼容：如果 flight_defaults 未设置，回退到 flight 节
+    // TODO(v4.0): 删除 flight 节，统一使用 flight_defaults
+    if (!global_nh.hasParam("flight_defaults/hover_duration")) {
+        global_nh.param<double>("flight/hover_duration", default_hover_time_, 5.0);
+        global_nh.param<double>("flight/travel_speed", default_speed_, 2.0);
+    }
 
     ROS_INFO("[WaypointManager] Configuration:");
     ROS_INFO("  - default save path: %s", config_.default_save_path.c_str());
@@ -266,7 +274,7 @@ bool WaypointManager::loadWaypointsCallback(uav_waypoint_manager::LoadWaypoints:
     std::string file_path = req.file_path.empty() ? config_.default_load_path : req.file_path;
 
     // 路径遍历保护
-    if (!isPathSafe(file_path, "/home/groundstation")) {
+    if (!isPathSafe(file_path, config_.allowed_base_path)) {
         res.success = false;
         res.message = "Access denied: path traversal detected or path outside allowed directory";
         res.waypoint_count = 0;
@@ -320,7 +328,7 @@ bool WaypointManager::saveWaypointsCallback(uav_waypoint_manager::SaveWaypoints:
     std::string file_path = req.file_path.empty() ? config_.default_save_path : req.file_path;
 
     // 路径遍历保护
-    if (!isPathSafe(file_path, "/home/groundstation")) {
+    if (!isPathSafe(file_path, config_.allowed_base_path)) {
         res.success = false;
         res.message = "Access denied: path traversal detected or path outside allowed directory";
         return true;
@@ -580,9 +588,14 @@ bool WaypointManager::loadFromXml(const std::string& file_path) {
             wp.hover_time = default_hover_time_;
             wp.speed = default_speed_;
 
+            // 查找当前 waypoint 的结束位置，用于边界检查
+            size_t waypoint_end_pos = content.find("</waypoint>", pos);
+            if (waypoint_end_pos == std::string::npos) waypoint_end_pos = content.size();
+
             size_t ht_start = content.find("<hover_time>", pos);
             size_t ht_end = content.find("</hover_time>", pos);
-            if (ht_start != std::string::npos && ht_end != std::string::npos) {
+            if (ht_start != std::string::npos && ht_end != std::string::npos
+                && ht_start < waypoint_end_pos && ht_end < waypoint_end_pos) {
                 try {
                     double val = std::stod(content.substr(ht_start + 12, ht_end - ht_start - 12));
                     if (isValidCoordinate(val)) wp.hover_time = val;
@@ -591,7 +604,8 @@ bool WaypointManager::loadFromXml(const std::string& file_path) {
 
             size_t sp_start = content.find("<speed>", pos);
             size_t sp_end = content.find("</speed>", pos);
-            if (sp_start != std::string::npos && sp_end != std::string::npos) {
+            if (sp_start != std::string::npos && sp_end != std::string::npos
+                && sp_start < waypoint_end_pos && sp_end < waypoint_end_pos) {
                 try {
                     double val = std::stod(content.substr(sp_start + 7, sp_end - sp_start - 7));
                     if (isValidCoordinate(val)) wp.speed = val;

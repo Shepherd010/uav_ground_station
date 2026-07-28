@@ -15,7 +15,6 @@
 
 #include <QPushButton>
 #include <QTableWidget>
-#include <QCheckBox>
 #include <QLineEdit>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -26,8 +25,6 @@
 #include <QTextEdit>
 #include <QFrame>
 #include <QProgressBar>
-#include <QComboBox>
-#include <QInputDialog>
 #include <QFileDialog>
 #include <QScrollArea>
 
@@ -48,13 +45,6 @@
 #include "uav_waypoint_manager/LoadWaypoints.h"
 
 namespace rviz_waypoint_panel {
-
-// 节点状态结构
-struct NodeStatus {
-    std::string name;
-    bool running;
-    QLabel *label;
-};
 
 class WaypointPanel : public rviz::Panel {
     Q_OBJECT
@@ -181,23 +171,18 @@ protected:
         double plan_maker_color_g;
         double plan_maker_color_b;
         double plan_maker_color_a;
-        double trajectory_width;
 
         double arrow_scale_x;
         double arrow_scale_y;
         double arrow_scale_z;
         double number_scale;
         double number_offset_z;
-        double color_r;
-        double color_g;
-        double color_b;
-        double color_a;
         int default_max_goals;
         int spin_timer_ms;
         std::string default_config_path;
         std::string config_loaded_topic;
         std::string config_reload_topic;
-        std::string waypoint_current_topic;
+        std::string record_control_topic;          // 录制控制话题
         std::string waypoint_params_input_topic;   // 发布 per-waypoint params
         std::string waypoint_params_loaded_topic;  // 订阅 waypoint_manager 存储的 params
         std::string default_save_path;     // 默认航点保存路径
@@ -208,7 +193,6 @@ protected:
     // ===== 数据 =====
     int max_num_goal_;
     int current_waypoint_count_;
-    static int marker_id_counter_;
     uint8_t current_nav_state_;
     bool mavros_connected_;
     bool mavros_armed_;
@@ -300,9 +284,6 @@ protected:
     // ===== 定时器 =====
     QTimer *spin_timer_;
     QTimer *status_check_timer_;
-
-    // 节点状态
-    std::map<std::string, NodeStatus> node_status_map_;
 };
 
 } // namespace rviz_waypoint_panel

@@ -40,7 +40,6 @@ topics:
   planned_path: "uav/trajectory/planned"
   real_path: "uav/trajectory/real"
   metrics_topic: "uav/experiment/metrics"
-  record_control_topic: "uav/experiment/record"
   config_loaded_topic: "uav/config/loaded"
   config_reload_topic: "uav/config/reload"
 
@@ -53,6 +52,7 @@ paths:
   default_save: "/home/groundstation/waypoints.xml"
   default_load: "/home/groundstation/waypoints.xml"
   default_frame_id: "map"
+  allowed_base: "/home/groundstation"  # 路径遍历保护允许的基路径
 
 # ============================================================================
 # 第二类：安全与阈值参数
@@ -75,7 +75,7 @@ position_safety:
 safety:
   max_height_limit: 2.0          # 最大允许飞行高度（米），超过即触发紧急保护
   communication_timeout: 5.0     # 通信超时（秒）
-  battery_threshold: 20.0        # 电池电量低阈值（%）
+  # battery_threshold: 20.0        # (未实现，保留供未来版本) 电池电量低阈值（%）
   check_interval: 1.0            # safety_monitor 检查间隔（秒）
   heartbeat_topic: "uav/safety/heartbeat"  # 心跳话题，证明 safety_monitor 存活
   alert_min_interval: 1.0        # 同类型告警最小发布间隔（秒）
@@ -116,7 +116,6 @@ flight:
 waypoint:
   reach_threshold_xy: 0.15       # 水平到达阈值（米）
   reach_threshold_z: 0.2         # 垂直到达阈值（米）
-  min_waypoint_spacing: 0.3      # 最小航点间距（米），验证时警告
 
 # ============================================================================
 # 第五类：航点验证参数（waypoint_manager）
@@ -133,7 +132,7 @@ publish_rate: 1.0
 # 第六类：RViz 面板可视化参数
 # ============================================================================
 panel:
-  default_config_path: "/home/groundstation/catkin_ws/config.yaml"
+  default_config_path: "/home/groundstation/uav_ground_station/config.yaml"
 
   # 话题配置
   goal_topic: "move_base_simple/goal"
@@ -175,20 +174,9 @@ panel:
   # 表格参数
   table:
     default_max_goals: 10
-    columns: ["x", "y", "z", "yaw"]
 
   # 定时器参数
   spin_timer_ms: 100
-
-  # 面板显示的关键飞行/安全参数路径
-  display_params:
-    - "flight_defaults/takeoff_height"
-    - "flight_defaults/hover_duration"
-    - "flight_defaults/setpoint_rate"
-    - "waypoint/reach_threshold_xy"
-    - "waypoint/reach_threshold_z"
-    - "safety/max_height_limit"
-    - "safety/communication_timeout"
 
 # ============================================================================
 # 第七类：Logger 配置

@@ -64,7 +64,6 @@ private:
 
         double max_height_limit;
         double communication_timeout;
-        double battery_threshold;
         double check_interval;
 
         double min_setpoint_rate_hz;
@@ -126,7 +125,6 @@ void SafetyMonitor::loadConfig() {
 
     global_nh.param<double>("safety/max_height_limit", config_.max_height_limit, 10.0);
     global_nh.param<double>("safety/communication_timeout", config_.communication_timeout, 5.0);
-    global_nh.param<double>("safety/battery_threshold", config_.battery_threshold, 20.0);
     global_nh.param<double>("safety/check_interval", config_.check_interval, 1.0);
     global_nh.param<double>("safety/alert_min_interval", config_.alert_min_interval, 1.0);
 

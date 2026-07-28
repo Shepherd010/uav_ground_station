@@ -1,7 +1,7 @@
 #!/bin/bash
 # Ground station core startup script
 # Starts roscore (if not running) and launches navigator + safety_monitor + waypoint_manager
-# Run on: ground station (192.168.31.30 in the default onboard setup)
+# Run on: ground station
 
 set -e
 
@@ -10,9 +10,10 @@ WORKSPACE="$(dirname "$SCRIPT_DIR")"
 
 # -----------------------------------------------------------------------------
 # ROS network defaults for the current ground station (this machine):
-#   - ROS Master runs on 192.168.31.116
+#   - ROS Master runs on this machine (default: localhost)
 #   - Onboard computer (192.168.31.180) connects to this master
 # Override by setting ROS_MASTER_URI / ROS_IP / ROS_HOSTNAME before running.
+# See CLAUDE.md for the default multi-machine setup.
 # -----------------------------------------------------------------------------
 export ROS_MASTER_URI="${ROS_MASTER_URI:-http://localhost:11311}"
 if [ -n "${ROS_HOSTNAME:-}" ]; then

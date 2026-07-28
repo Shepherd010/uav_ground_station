@@ -50,7 +50,3 @@ target_link_libraries(waypoint_manager ${catkin_LIBRARIES})
 install(TARGETS waypoint_manager
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-
-install(DIRECTORY config/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
-)

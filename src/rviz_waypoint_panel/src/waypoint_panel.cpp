@@ -1,7 +1,5 @@
-#include <cstdio>
 #include <fstream>
 #include <sstream>
-#include <QPainter>
 #include <QLineEdit>
 #include <QVBoxLayout>
 #include <QLabel>
@@ -12,13 +10,11 @@
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QGroupBox>
-#include <QInputDialog>
 #include <QTextEdit>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QFrame>
 #include <QProgressBar>
-#include <QComboBox>
 #include <QDateTime>
 #include <QProcess>
 #include <QScrollArea>
@@ -29,8 +25,6 @@
 #include <tf/transform_datatypes.h>
 
 namespace rviz_waypoint_panel {
-
-int WaypointPanel::marker_id_counter_ = 0;
 
 // ========== 构造函数 ==========
 WaypointPanel::WaypointPanel(QWidget *parent)
@@ -65,7 +59,7 @@ WaypointPanel::WaypointPanel(QWidget *parent)
     config_loaded_pub_ = nh_.advertise<std_msgs::String>(config_.config_loaded_topic, 1, true);
     config_reload_pub_ = nh_.advertise<std_msgs::String>(config_.config_reload_topic, 1, true);
     waypoint_params_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(config_.waypoint_params_input_topic, 1, true);
-    record_control_pub_ = nh_.advertise<std_msgs::Bool>("uav/experiment/record", 1, true);
+    record_control_pub_ = nh_.advertise<std_msgs::Bool>(config_.record_control_topic, 1, true);
     // 从 waypoint_manager 的独立 current 话题接收存储的 params，避免自订阅回环
     waypoint_params_sub_ = nh_.subscribe<std_msgs::Float64MultiArray>(
         config_.waypoint_params_loaded_topic, 1, boost::bind(&WaypointPanel::receiveWaypointParams, this, _1));
@@ -395,23 +389,18 @@ void WaypointPanel::loadConfig() {
     pnh.param<double>("panel/plan_maker/color_g", config_.plan_maker_color_g, 0.65);
     pnh.param<double>("panel/plan_maker/color_b", config_.plan_maker_color_b, 0.0);
     pnh.param<double>("panel/plan_maker/color_a", config_.plan_maker_color_a, 0.9);
-    pnh.param<double>("panel/plan_maker/trajectory_width", config_.trajectory_width, 0.05);
 
     pnh.param<double>("panel/marker/arrow_scale_x", config_.arrow_scale_x, 0.6);
     pnh.param<double>("panel/marker/arrow_scale_y", config_.arrow_scale_y, 0.15);
     pnh.param<double>("panel/marker/arrow_scale_z", config_.arrow_scale_z, 0.15);
     pnh.param<double>("panel/marker/number_scale", config_.number_scale, 0.8);
     pnh.param<double>("panel/marker/number_offset_z", config_.number_offset_z, 0.6);
-    pnh.param<double>("panel/marker/color_r", config_.color_r, 1.0);
-    pnh.param<double>("panel/marker/color_g", config_.color_g, 0.84);
-    pnh.param<double>("panel/marker/color_b", config_.color_b, 0.0);
-    pnh.param<double>("panel/marker/color_a", config_.color_a, 1.0);
     pnh.param<int>("panel/table/default_max_goals", config_.default_max_goals, 10);
     pnh.param<int>("panel/spin_timer_ms", config_.spin_timer_ms, 100);
-    pnh.param<std::string>("panel/default_config_path", config_.default_config_path, "/home/groundstation/catkin_ws/config.yaml");
+    pnh.param<std::string>("panel/default_config_path", config_.default_config_path, "/home/groundstation/uav_ground_station/config.yaml");
     pnh.param<std::string>("topics/config_loaded_topic", config_.config_loaded_topic, "uav/config/loaded");
     pnh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
-    pnh.param<std::string>("panel/waypoint_current_topic", config_.waypoint_current_topic, "uav/waypoints/current");
+    pnh.param<std::string>("experiment/record_control_topic", config_.record_control_topic, "uav/experiment/record");
     pnh.param<std::string>("panel/waypoint_params_input_topic", config_.waypoint_params_input_topic, "uav/waypoints/params");
     pnh.param<std::string>("panel/waypoint_params_loaded_topic", config_.waypoint_params_loaded_topic, "uav/waypoints/params_loaded");
 
@@ -424,6 +413,12 @@ void WaypointPanel::loadConfig() {
     ros::NodeHandle global_nh;
     global_nh.param<double>("flight_defaults/hover_duration", default_hover_time_, 5.0);
     global_nh.param<double>("flight_defaults/travel_speed", default_speed_, 2.0);
+    // 向后兼容：如果 flight_defaults 未设置，回退到 flight 节
+    // TODO(v4.0): 删除 flight 节，统一使用 flight_defaults
+    if (!global_nh.hasParam("flight_defaults/hover_duration")) {
+        global_nh.param<double>("flight/hover_duration", default_hover_time_, 5.0);
+        global_nh.param<double>("flight/travel_speed", default_speed_, 2.0);
+    }
 
     max_num_goal_ = config_.default_max_goals;
 }
@@ -464,32 +459,32 @@ void WaypointPanel::truncateLog() {
 // ========== 状态转换辅助 ==========
 QString WaypointPanel::stateToString(uint8_t state) {
     switch (state) {
-        case 0: return "IDLE";
-        case 1: return "PRE_FLIGHT";
-        case 2: return "ARMING";
-        case 3: return "TAKEOFF";
-        case 4: return "NAVIGATING";
-        case 5: return "HOVERING";
-        case 6: return "LANDING";
-        case 7: return "LANDED";
-        case 8: return "EMERGENCY";
-        case 9: return "RETURNING";
+        case uav_navigator::NavigatorStatus::STATE_IDLE: return "IDLE";
+        case uav_navigator::NavigatorStatus::STATE_PRE_FLIGHT: return "PRE_FLIGHT";
+        case uav_navigator::NavigatorStatus::STATE_ARMING: return "ARMING";
+        case uav_navigator::NavigatorStatus::STATE_TAKEOFF: return "TAKEOFF";
+        case uav_navigator::NavigatorStatus::STATE_NAVIGATING: return "NAVIGATING";
+        case uav_navigator::NavigatorStatus::STATE_HOVERING: return "HOVERING";
+        case uav_navigator::NavigatorStatus::STATE_LANDING: return "LANDING";
+        case uav_navigator::NavigatorStatus::STATE_LANDED: return "LANDED";
+        case uav_navigator::NavigatorStatus::STATE_EMERGENCY: return "EMERGENCY";
+        case uav_navigator::NavigatorStatus::STATE_RETURNING: return "RETURNING";
         default: return "UNKNOWN";
     }
 }
 
 QString WaypointPanel::stateToColor(uint8_t state) {
     switch (state) {
-        case 0: return "#2196F3";  // IDLE - blue
-        case 1: return "#FF9800";  // PRE_FLIGHT - orange
-        case 2: return "#FF9800";  // ARMING - orange
-        case 3: return "#4CAF50";  // TAKEOFF - green
-        case 4: return "#4CAF50";  // NAVIGATING - green
-        case 5: return "#9C27B0";  // HOVERING - purple
-        case 6: return "#FF5722";  // LANDING - deep orange
-        case 7: return "#2196F3";  // LANDED - blue
-        case 8: return "#F44336";  // EMERGENCY - red
-        case 9: return "#FF5722";  // RETURNING - deep orange
+        case uav_navigator::NavigatorStatus::STATE_IDLE: return "#2196F3";  // IDLE - blue
+        case uav_navigator::NavigatorStatus::STATE_PRE_FLIGHT: return "#FF9800";  // PRE_FLIGHT - orange
+        case uav_navigator::NavigatorStatus::STATE_ARMING: return "#FF9800";  // ARMING - orange
+        case uav_navigator::NavigatorStatus::STATE_TAKEOFF: return "#4CAF50";  // TAKEOFF - green
+        case uav_navigator::NavigatorStatus::STATE_NAVIGATING: return "#4CAF50";  // NAVIGATING - green
+        case uav_navigator::NavigatorStatus::STATE_HOVERING: return "#9C27B0";  // HOVERING - purple
+        case uav_navigator::NavigatorStatus::STATE_LANDING: return "#FF5722";  // LANDING - deep orange
+        case uav_navigator::NavigatorStatus::STATE_LANDED: return "#2196F3";  // LANDED - blue
+        case uav_navigator::NavigatorStatus::STATE_EMERGENCY: return "#F44336";  // EMERGENCY - red
+        case uav_navigator::NavigatorStatus::STATE_RETURNING: return "#FF5722";  // RETURNING - deep orange
         default: return "#757575"; // UNKNOWN - grey
     }
 }
@@ -682,27 +677,35 @@ void WaypointPanel::deleteSelectedPlanPoint() {
     // 不直接删除 plan_maker_points_ —— deleteSelectedWaypoint() 统一管理数据结构的删除
     // 避免 double-erase bug
     if (idx < current_waypoint_count_) {
+        // deleteSelectedWaypoint() 已处理 phase 转换 + marker 刷新 + trajectory 更新
         waypoint_table_->setCurrentCell(idx, 0);
         deleteSelectedWaypoint();
     } else {
         // 表格中没有对应的行，直接从数据结构中删除
         plan_maker_points_.erase(plan_maker_points_.begin() + idx);
+        // 同步清理 per-waypoint 参数
+        if (idx < static_cast<int>(waypoint_hover_times_.size())) {
+            waypoint_hover_times_.erase(waypoint_hover_times_.begin() + idx);
+        }
+        if (idx < static_cast<int>(waypoint_speeds_.size())) {
+            waypoint_speeds_.erase(waypoint_speeds_.begin() + idx);
+        }
         if (plan_maker_selected_index_ >= static_cast<int>(plan_maker_points_.size())) {
             plan_maker_selected_index_ = static_cast<int>(plan_maker_points_.size()) - 1;
         }
+        // else 分支自行处理 phase + marker + trajectory
+        publishPlanMakerMarkers();
+        if (plan_maker_phase_ == CONNECTED || plan_maker_phase_ == SAVED) {
+            publishPlanTrajectory();
+        }
+        // 删除后自动调整阶段：<2 点回 PLANNING，SAVED 回 CONNECTED（数据已变更需重新发布）
+        if (plan_maker_points_.size() < 2) {
+            setPlanMakerPhase(PLANNING);
+        } else if (plan_maker_phase_ == SAVED) {
+            setPlanMakerPhase(CONNECTED);
+        }
+        updatePlanMakerStatus();
     }
-
-    publishPlanMakerMarkers();
-    if (plan_maker_phase_ == CONNECTED || plan_maker_phase_ == SAVED) {
-        publishPlanTrajectory();
-    }
-    // 删除后自动调整阶段：<2 点回 PLANNING，SAVED 回 CONNECTED（数据已变更需重新发布）
-    if (plan_maker_points_.size() < 2) {
-        setPlanMakerPhase(PLANNING);
-    } else if (plan_maker_phase_ == SAVED) {
-        setPlanMakerPhase(CONNECTED);
-    }
-    updatePlanMakerStatus();
     logInfo(QString("已删除规划点 %1").arg(idx + 1));
 }
 
@@ -888,7 +891,10 @@ void WaypointPanel::loadConfigFromFile() {
                 display_text += append_section("[panel]", root["panel"]);
             } catch (const std::exception &e) {
                 logError(QString("解析 YAML 失败: %1").arg(e.what()));
-                display_text = QString("配置文件已加载，但解析失败: %1").arg(e.what());
+                display_text = QString("配置文件已加载，但解析失败: %1\n\n请检查 YAML 语法后重试。").arg(e.what());
+                config_display_->setPlainText(display_text);
+                logError("配置加载中止 — YAML 解析失败，不触发节点重载");
+                return;
             }
             config_display_->setPlainText(display_text);
 
@@ -1350,8 +1356,6 @@ void WaypointPanel::clearMarkers() {
     marker_pub_.publish(marker_delete);
     marker_delete.ns = "uav_plan_maker_numbers";
     marker_pub_.publish(marker_delete);
-
-    marker_id_counter_ = 0;
 }
 
 // ========== 飞行控制 ==========
@@ -1382,7 +1386,11 @@ void WaypointPanel::hoverInPlace() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "PAUSE";
     if (nav_command_client_.call(srv)) {
-        logInfo("悬停：保持当前位置，可继续执行剩余航点");
+        if (srv.response.success) {
+            logInfo("悬停：保持当前位置，可继续执行剩余航点");
+        } else {
+            logWarn(QString("悬停被拒绝: %1").arg(QString::fromStdString(srv.response.message)));
+        }
     } else { logError("悬停命令失败"); }
 }
 
@@ -1391,7 +1399,11 @@ void WaypointPanel::landNow() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "LAND";
     if (nav_command_client_.call(srv)) {
-        logInfo("降落：飞控切换到 AUTO.LAND，立即着陆");
+        if (srv.response.success) {
+            logInfo("降落：飞控切换到 AUTO.LAND，立即着陆");
+        } else {
+            logWarn(QString("降落被拒绝: %1").arg(QString::fromStdString(srv.response.message)));
+        }
     } else { logError("降落命令失败"); }
 }
 
@@ -1400,7 +1412,11 @@ void WaypointPanel::returnToHome() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "RETURN_TO_HOME";
     if (nav_command_client_.call(srv)) {
-        logInfo("返航：返回起飞点（TAKEOFF 阶段记录的 Home 位置）并着陆");
+        if (srv.response.success) {
+            logInfo("返航：返回起飞点（TAKEOFF 阶段记录的 Home 位置）并着陆");
+        } else {
+            logWarn(QString("返航被拒绝: %1").arg(QString::fromStdString(srv.response.message)));
+        }
     } else { logError("返航命令失败"); }
 }
 
@@ -1409,7 +1425,11 @@ void WaypointPanel::resetNavigator() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "RESET";
     if (nav_command_client_.call(srv)) {
-        logInfo("状态机已重置 → IDLE，可开始新任务");
+        if (srv.response.success) {
+            logInfo("状态机已重置 → IDLE，可开始新任务");
+        } else {
+            logWarn(QString("重置被拒绝: %1").arg(QString::fromStdString(srv.response.message)));
+        }
     } else { logError("重置失败"); }
 }
 
@@ -1422,7 +1442,11 @@ void WaypointPanel::emergencyStop() {
     uav_navigator::NavigatorCommand srv;
     srv.request.command = "EMERGENCY_STOP";
     if (nav_command_client_.call(srv)) {
-        logError("⚠ 紧急停止已触发！飞控正在切换到 AUTO.LAND");
+        if (srv.response.success) {
+            logError("⚠ 紧急停止已触发！飞控正在切换到 AUTO.LAND");
+        } else {
+            logError(QString("紧急停止被拒绝: %1").arg(QString::fromStdString(srv.response.message)));
+        }
     } else { logError("紧急停止调用失败"); }
 }
 

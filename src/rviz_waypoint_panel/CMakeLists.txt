@@ -13,7 +13,6 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   std_msgs
   visualization_msgs
-  actionlib_msgs
   nav_msgs
   mavros_msgs
   uav_navigator
@@ -45,7 +44,6 @@ catkin_package(
     geometry_msgs
     std_msgs
     visualization_msgs
-    actionlib_msgs
     nav_msgs
     mavros_msgs
     tf
@@ -74,6 +72,10 @@ install(TARGETS ${PROJECT_NAME}
 
 install(FILES plugin_description.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY launch/
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
 )
 
 install(DIRECTORY config/
