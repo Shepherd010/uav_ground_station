@@ -378,44 +378,44 @@ WaypointPanel::~WaypointPanel() {
 
 // ========== 配置加载 ==========
 void WaypointPanel::loadConfig() {
-    // 使用全局命名空间的参数句柄，因为 config.yaml 在 launch 中作为全局参数加载
-    ros::NodeHandle pnh;
-    pnh.param<std::string>("panel/goal_topic", config_.goal_topic, "move_base_simple/goal");
-    pnh.param<std::string>("panel/marker_topic", config_.marker_topic, "visualization_marker");
-    pnh.param<std::string>("panel/waypoint_input_topic", config_.waypoint_input_topic, "uav/waypoints/input");
-    pnh.param<std::string>("panel/navigator_status_topic", config_.navigator_status_topic, "uav/navigator/status");
-    pnh.param<std::string>("panel/mavros_state_topic", config_.mavros_state_topic, "mavros/state");
-    pnh.param<std::string>("panel/odom_topic", config_.odom_topic, "mavros/local_position/odom");
-    pnh.param<std::string>("panel/save_service", config_.save_service, "uav/waypoint_manager/save_waypoints");
-    pnh.param<std::string>("panel/load_service", config_.load_service, "uav/waypoint_manager/load_waypoints");
-    pnh.param<std::string>("panel/nav_command_service", config_.nav_command_service, "uav/navigator/command");
+    // 默认命名空间句柄（config.yaml 在 launch 时 load 进全局 / 命名空间，ros::NodeHandle 无参构造即解析全局 key）
+    ros::NodeHandle nh_global;
+    nh_global.param<std::string>("panel/goal_topic", config_.goal_topic, "move_base_simple/goal");
+    nh_global.param<std::string>("panel/marker_topic", config_.marker_topic, "visualization_marker");
+    nh_global.param<std::string>("panel/waypoint_input_topic", config_.waypoint_input_topic, "uav/waypoints/input");
+    nh_global.param<std::string>("panel/navigator_status_topic", config_.navigator_status_topic, "uav/navigator/status");
+    nh_global.param<std::string>("panel/mavros_state_topic", config_.mavros_state_topic, "mavros/state");
+    nh_global.param<std::string>("panel/odom_topic", config_.odom_topic, "mavros/local_position/odom");
+    nh_global.param<std::string>("panel/save_service", config_.save_service, "uav/waypoint_manager/save_waypoints");
+    nh_global.param<std::string>("panel/load_service", config_.load_service, "uav/waypoint_manager/load_waypoints");
+    nh_global.param<std::string>("panel/nav_command_service", config_.nav_command_service, "uav/navigator/command");
 
-    pnh.param<std::string>("panel/plan_maker/points_topic", config_.plan_maker_points_topic, "uav/plan_maker/points");
-    pnh.param<std::string>("panel/plan_maker/trajectory_topic", config_.plan_maker_trajectory_topic, "uav/plan_maker/trajectory");
-    pnh.param<double>("panel/plan_maker/sphere_scale", config_.plan_maker_sphere_scale, 0.15);
-    pnh.param<double>("panel/plan_maker/color_r", config_.plan_maker_color_r, 1.0);
-    pnh.param<double>("panel/plan_maker/color_g", config_.plan_maker_color_g, 0.65);
-    pnh.param<double>("panel/plan_maker/color_b", config_.plan_maker_color_b, 0.0);
-    pnh.param<double>("panel/plan_maker/color_a", config_.plan_maker_color_a, 0.9);
+    nh_global.param<std::string>("panel/plan_maker/points_topic", config_.plan_maker_points_topic, "uav/plan_maker/points");
+    nh_global.param<std::string>("panel/plan_maker/trajectory_topic", config_.plan_maker_trajectory_topic, "uav/plan_maker/trajectory");
+    nh_global.param<double>("panel/plan_maker/sphere_scale", config_.plan_maker_sphere_scale, 0.15);
+    nh_global.param<double>("panel/plan_maker/color_r", config_.plan_maker_color_r, 1.0);
+    nh_global.param<double>("panel/plan_maker/color_g", config_.plan_maker_color_g, 0.65);
+    nh_global.param<double>("panel/plan_maker/color_b", config_.plan_maker_color_b, 0.0);
+    nh_global.param<double>("panel/plan_maker/color_a", config_.plan_maker_color_a, 0.9);
 
-    pnh.param<double>("panel/marker/arrow_scale_x", config_.arrow_scale_x, 0.6);
-    pnh.param<double>("panel/marker/arrow_scale_y", config_.arrow_scale_y, 0.15);
-    pnh.param<double>("panel/marker/arrow_scale_z", config_.arrow_scale_z, 0.15);
-    pnh.param<double>("panel/marker/number_scale", config_.number_scale, 0.8);
-    pnh.param<double>("panel/marker/number_offset_z", config_.number_offset_z, 0.6);
-    pnh.param<int>("panel/table/default_max_goals", config_.default_max_goals, 10);
-    pnh.param<int>("panel/spin_timer_ms", config_.spin_timer_ms, 100);
-    pnh.param<std::string>("panel/default_config_path", config_.default_config_path, "");
-    pnh.param<std::string>("topics/config_loaded_topic", config_.config_loaded_topic, "uav/config/loaded");
-    pnh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
-    pnh.param<std::string>("experiment/record_control_topic", config_.record_control_topic, "uav/experiment/record");
-    pnh.param<std::string>("panel/waypoint_params_input_topic", config_.waypoint_params_input_topic, "uav/waypoints/params");
-    pnh.param<std::string>("panel/waypoint_params_loaded_topic", config_.waypoint_params_loaded_topic, "uav/waypoints/params_loaded");
+    nh_global.param<double>("panel/marker/arrow_scale_x", config_.arrow_scale_x, 0.6);
+    nh_global.param<double>("panel/marker/arrow_scale_y", config_.arrow_scale_y, 0.15);
+    nh_global.param<double>("panel/marker/arrow_scale_z", config_.arrow_scale_z, 0.15);
+    nh_global.param<double>("panel/marker/number_scale", config_.number_scale, 0.8);
+    nh_global.param<double>("panel/marker/number_offset_z", config_.number_offset_z, 0.6);
+    nh_global.param<int>("panel/table/default_max_goals", config_.default_max_goals, 10);
+    nh_global.param<int>("panel/spin_timer_ms", config_.spin_timer_ms, 100);
+    nh_global.param<std::string>("panel/default_config_path", config_.default_config_path, "");
+    nh_global.param<std::string>("topics/config_loaded_topic", config_.config_loaded_topic, "uav/config/loaded");
+    nh_global.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
+    nh_global.param<std::string>("experiment/record_control_topic", config_.record_control_topic, "uav/experiment/record");
+    nh_global.param<std::string>("panel/waypoint_params_input_topic", config_.waypoint_params_input_topic, "uav/waypoints/params");
+    nh_global.param<std::string>("panel/waypoint_params_loaded_topic", config_.waypoint_params_loaded_topic, "uav/waypoints/params_loaded");
 
     // 文件路径 — 默认值使用 ~ 前缀以支持跨机器移植
-    pnh.param<std::string>("paths/default_save", config_.default_save_path, "~/waypoints.xml");
-    pnh.param<std::string>("paths/default_load", config_.default_load_path, "~/waypoints.xml");
-    pnh.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
+    nh_global.param<std::string>("paths/default_save", config_.default_save_path, "~/waypoints.xml");
+    nh_global.param<std::string>("paths/default_load", config_.default_load_path, "~/waypoints.xml");
+    nh_global.param<std::string>("paths/default_frame_id", config_.default_frame_id, "map");
 
     // 展开 ~ 为 $HOME
     config_.default_save_path = resolveHome(config_.default_save_path);
@@ -898,7 +898,7 @@ void WaypointPanel::loadConfigFromFile() {
                     return section;
                 };
 
-                display_text += append_section("[flight]", root["flight"]);
+                display_text += append_section("[flight_defaults]", root["flight_defaults"]);
                 display_text += append_section("[waypoint]", root["waypoint"]);
                 display_text += append_section("[safety]", root["safety"]);
                 display_text += append_section("[offboard_safety]", root["offboard_safety"]);

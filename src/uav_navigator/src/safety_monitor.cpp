@@ -123,7 +123,7 @@ void SafetyMonitor::loadConfig() {
     global_nh.param<std::string>("topics/config_reload_topic", config_.config_reload_topic, "uav/config/reload");
     global_nh.param<std::string>("safety/heartbeat_topic", config_.heartbeat_topic, "uav/safety/heartbeat");
 
-    global_nh.param<double>("safety/max_height_limit", config_.max_height_limit, 10.0);
+    global_nh.param<double>("safety/max_height_limit", config_.max_height_limit, 2.0);
     global_nh.param<double>("safety/communication_timeout", config_.communication_timeout, 5.0);
     global_nh.param<double>("safety/check_interval", config_.check_interval, 1.0);
     global_nh.param<double>("safety/alert_min_interval", config_.alert_min_interval, 1.0);

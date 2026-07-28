@@ -131,7 +131,6 @@ rostopic echo /uav/waypoints/current
 | `validation/duplicate_threshold` | 0.01 | 重复判定阈值 (m) |
 | `validation/max_height` | 2.0 | 建议最大高度 (m) |
 | `validation/min_height` | 0.5 | 建议最小高度 (m) |
-| `publish_rate` | 1.0 | 发布频率 (Hz) |
 | `paths/default_save` | `~/waypoints.xml` | 默认保存路径（~ 展开为 $HOME） |
 | `paths/default_load` | `~/waypoints.xml` | 默认加载路径 |
 | `paths/allowed_base` | `~` | 路径遍历保护基路径 |

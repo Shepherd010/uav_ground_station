@@ -4,6 +4,30 @@
 
 ---
 
+## [3.2.1] - 2026-07-28 - 二次深度排查修复
+
+### 关键修复
+- **config.yaml 损坏修复：** `services:` 头部被用户指令文本覆盖，导致 YAML 语法错误
+- **孤立参数删除：** `publish_rate: 1.0` 已在 v3.2.0 中从代码移除，但 config.yaml 中残留
+- **面板配置显示：** `loadConfigFromFile()` 引用已删除的 `root["flight"]`，改为 `root["flight_defaults"]`
+- **配置文件引用错误：** `navigator.cpp` 警告消息引用已删除的 `navigator_config.yaml`
+- **CLAUDE.md：** 三处引用已删除的配置文件（`navigator_config.yaml`、`panel_config.yaml`），统一改为 `config.yaml`
+
+### 默认值一致性
+- `navigator.cpp` 中 `hover_duration` C++ 默认值 2.0→5.0（与 config.yaml 一致）
+- `navigator.cpp` + `safety_monitor.cpp` 中 `max_height_limit` C++ 默认值 10.0→2.0（与 config.yaml 一致）
+- `waypoint_panel.cpp` 中 `loadConfig()` 变量名 `pnh`→`nh_global`（消除误导性命名）
+
+### 文档修正
+- `uav_waypoint_manager/README.md`：删除孤立参数 `publish_rate` 的文档条目
+
+### 编译验证
+- 全部 3 包：0 错误，0 警告
+- 全部 4 脚本：`bash -n` 通过
+- config.yaml：14/14 section 通过 YAML 结构验证
+
+---
+
 ## [3.2.0] - 2026-07-28 - 通用性现代化：路径移植、向后兼容清理、GitHub 就绪
 
 ### 路径通用化 — 全部路径基于 `$HOME` 自动适配

@@ -22,7 +22,6 @@
 #include <cstring>
 #include <sys/stat.h>
 #include <map>
-#include <sys/stat.h>
 
 namespace uav_navigator {
 

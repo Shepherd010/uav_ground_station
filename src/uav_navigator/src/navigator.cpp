@@ -310,7 +310,7 @@ void Navigator::loadConfig() {
 
     // 飞行参数
     global_nh.param<double>("flight_defaults/takeoff_height", config_.takeoff_height, 1.0);
-    global_nh.param<double>("flight_defaults/hover_duration", config_.hover_duration, 2.0);
+    global_nh.param<double>("flight_defaults/hover_duration", config_.hover_duration, 5.0);
     global_nh.param<double>("flight_defaults/setpoint_rate", config_.setpoint_rate, 20.0);
     global_nh.param<int>("flight_defaults/offboard_pre_pub_count", config_.offboard_pre_pub_count, 100);
     global_nh.param<double>("flight_defaults/landing_height_threshold", config_.landing_height_threshold, 0.15);
@@ -342,7 +342,7 @@ void Navigator::loadConfig() {
     }
 
     // 安全参数
-    global_nh.param<double>("safety/max_height_limit", config_.max_height_limit, 10.0);
+    global_nh.param<double>("safety/max_height_limit", config_.max_height_limit, 2.0);
 
     // OFFBOARD 安全参数
     global_nh.param<double>("offboard_safety/min_setpoint_rate_hz", config_.min_setpoint_rate_hz, 10.0);
@@ -1227,7 +1227,7 @@ bool Navigator::checkPreFlight() {
     for (size_t i = 0; i < waypoints_.poses.size(); ++i) {
         if (waypoints_.poses[i].position.z > config_.max_height_limit) {
             ROS_WARN("[Navigator] Waypoint %zu height (%.2f m) exceeds safety limit (%.2f m),"
-                     "please check safety/max_height_limit setting in navigator_config.yaml",
+                     "please check safety/max_height_limit setting in config.yaml",
                      i + 1, waypoints_.poses[i].position.z, config_.max_height_limit);
         }
     }

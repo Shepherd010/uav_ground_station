@@ -97,7 +97,7 @@ These defaults can be overridden by setting the environment variables before run
 - `safety_monitor` — Independent node monitoring communication timeout, height limits, MAVROS connection, mode anomalies. Publishes alerts to `/uav/safety/alert`.
 - `logger` — Subscribes to key topics and prints a formatted status summary to the terminal.
 
-**All parameters** are loaded from `uav_navigator/config/navigator_config.yaml` (via `rosparam load`). No hardcoded values in the source code.
+**All parameters** are loaded from `config.yaml` (via `rosparam load`). No hardcoded values in the source code.
 
 **Key topics:**
 - Subscribe: `mavros/state` (State), `mavros/local_position/odom` (Odometry), `uav/waypoints/current` (PoseArray), `uav/safety/alert` (String)
@@ -139,7 +139,7 @@ These defaults can be overridden by setting the environment variables before run
 - Publish: `uav/plan_maker/points` (MarkerArray, spheres+arrows+numbers), `uav/plan_maker/trajectory` (Path), `uav/waypoints/input` (PoseArray), `uav/waypoints/params` (Float64MultiArray), `uav/experiment/record` (Bool)
 - Service clients: `uav/waypoint_manager/save_waypoints`, `uav/waypoint_manager/load_waypoints`, `uav/navigator/command`
 
-**All parameters** from `rviz_waypoint_panel/config/panel_config.yaml`.
+**All parameters** from `config.yaml`.
 
 ## Configuration Files
 
@@ -183,11 +183,11 @@ rosservice call /uav/safety/emergency_stop
 
 ## Architecture Rules
 
-1. **No hardcoded values.** All topics, thresholds, timeouts, rates, and colors are loaded from YAML config files via `ros::NodeHandle("~")` / `pnh`. Every parameter has a default fallback.
+1. **No hardcoded values.** All topics, thresholds, timeouts, rates, and colors are loaded from `config.yaml` via the ROS param server global namespace. Every parameter has a default fallback.
 2. **Safety monitor is independent.** It runs as a separate node and can trigger emergency actions even if the navigator crashes.
 3. **State machine is explicit.** All state transitions in `navigator.cpp` go through `transitionState()`. Every state has enter/exit logic and timeout handling.
 4. **Setpoints are published via `ros::Timer`.** Never use `ros::Duration::sleep()` or blocking calls in the main thread. The setpoint timer runs at the configured rate (default 20Hz) independently of the state machine timer (10Hz).
-5. **Namespace consistency.** All topic names in config files are relative. The `namespace` parameter in `navigator_config.yaml` determines the root namespace. Do not use absolute paths with leading `/` in topic names.
+5. **Namespace consistency.** All topic names in config files are relative. The `namespace` parameter in `config.yaml` determines the root namespace. Do not use absolute paths with leading `/` in topic names.
 6. **Waypoint validation.** The waypoint manager validates duplicates, spacing, and height range before publishing. Warnings are logged but do not block execution (non-fatal validation).
 
 ## Common Development Tasks
