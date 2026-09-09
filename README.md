@@ -13,7 +13,7 @@
 git clone <repo-url> ~/uav_ground_station
 
 # 2. 安装依赖（Ubuntu 20.04 + ROS Noetic）
-sudo apt install python3-catkin-tools ros-noetic-mavros ros-noetic-mavros-extras
+sudo apt install python3-catkin-tools python3-yaml ros-noetic-mavros ros-noetic-mavros-extras
 
 # 3. 构建
 cd ~/uav_ground_station
@@ -46,6 +46,45 @@ cd ~/uav_ground_station
 ./scripts/record_bag.sh status
 ./scripts/record_bag.sh stop
 ```
+
+### 从 DLIO-SLAM rosbag 生成 2.5D 静态航线
+
+规划器读取一次飞行的 /robot/dlio/map_node/map 最后一帧累计地图识别障碍物，
+并读取 /robot/dlio/odom_node/pointcloud/deskewed 与
+/robot/dlio/odom_node/odom，通过射线清空建立 FREE 空间。在 planner.z 的
+XOY 平面、上下各 slice_half_height 米范围内栅格化，并用 A* 生成包含起点和
+终点的 XML 航点。没有射线观测的区域保持 UNKNOWN，A* 禁止进入；地图先按
+planner.map_voxel_size、逐帧点云按 planner.scan_voxel_size 做稀疏采样，飞机
+尺寸按米填写（默认 0.6 × 0.6 × 0.45，对应 60 × 60 × 45 cm）。
+首次读取后的解码结果会缓存到 planner.cache_dir；同一 bag、话题、frame 和
+逐帧采样参数不变时，后续规划直接读取缓存。
+占据栅格也会按切片、飞机尺寸、栅格和地图采样参数持久缓存；重新打开软件并选择
+同一 bag 时，不需要再次持续解析点云或构建栅格。FREE 栅格按 A* 的 8 邻域划分
+连通域，OCCUPIED 端点只会吸附到与另一端连通的 FREE 区域，UNKNOWN 仍然拒绝。
+当前默认累计地图采样体素为 0.4m，仍可在面板中调整。
+
+~~~
+cd ~/uav_ground_station
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+
+# 扫描 ~/experiments/rosbag，选择含地图话题的 bag
+./scripts/plan_2d/main.py
+
+# 也可以直接指定某次飞行和配置/输出文件
+./scripts/plan_2d/main.py \
+  ~/experiments/rosbag/flight_2026-09-08_15-22-39/full_flight_2026-09-08-15-22-40.bag \
+  --config ./config.yaml \
+  --output ~/waypoints.xml
+
+# 规划器保存 XML 后，按现有流程加载并执行
+./scripts/start_mission.sh ~/waypoints.xml
+~~~
+
+规划过程是 curses 键盘面板：参数平铺显示，方向键移动，Enter/e 编辑，
+p 规划，x 保存 XML，w/a 保存或另存 YAML，l 加载配置，b 更换 bag。不会
+逐项重复确认参数；只有覆盖已有文件时询问确认。当前地图、逐帧点云和 odom
+均要求为 robot/odom，输出 XML frame 为 map，与现有地面站的静态坐标约定一致。
 
 ## 系统架构
 
@@ -198,7 +237,7 @@ receiveGoal()
     └→ load_waypoints srv CALL → waypoint_manager.loadWaypointsCallback()
         ←── response.waypoints (PoseArray 直接返回，不用 waitForMessage)
     └→ 填充 plan_maker_points_ + 表格 + publishPlanMakerMarkers()
-    └→ 自动连接轨迹 (≥2 点) + 等待 navigator 确认 → 自动就绪
+    └→ 自动连接轨迹 (≥1 点) + 等待 navigator 确认 → 自动就绪
 ```
 
 ## 话题速查
@@ -319,6 +358,7 @@ config.yaml 参数分类：
   第六类 panel           — RViz 面板可视化参数
   第七类 logger          — 日志配置
   第八类 experiment      — 实验记录配置
+  第九类 planner         — 离线 2.5D 静态航点规划配置
 ```
 
 ### 配置热重载流程
@@ -356,7 +396,7 @@ config.yaml 参数分类：
 ```
 第 1 层: PX4 硬件 RC 接管（遥控器拨杆随时切出 OFFBOARD）
 第 2 层: safety_monitor 独立节点（navigator 崩溃也能触发保护）
-第 3 层: navigator 内置安全检查（高度/跳变/模式丢失/超时）
+第 3 层: navigator 内置安全检查（高度/跳变/超时）
 ```
 
 ### safety_monitor 检测项
@@ -366,11 +406,12 @@ config.yaml 参数分类：
 | 高度超限 | z > max_height_limit | publishAlert HEIGHT_EXCEEDED |
 | 导航器通信超时 | 无 status > communication_timeout | publishAlert NAVIGATOR_TIMEOUT |
 | setpoint 流失效 | 飞行中无 setpoint > setpoint_timeout | publishAlert SETPOINT_TIMEOUT |
-| 模式丢失 | 飞行中 mode≠OFFBOARD > tolerance | publishAlert MODE_MISMATCH |
 | MAVROS 断连 | mavros connected=false | publishAlert MAVROS_DISCONNECTED |
 | MAVROS 超时 | 无 mavros state > communication_timeout | publishAlert MAVROS_TIMEOUT |
 | 位置跳变 | 位移 > jump_distance / window | publishAlert POSITION_JUMP |
 | 心跳 | 每秒发布 uav/safety/heartbeat | 证明节点存活 |
+
+飞行状态以 `uav/navigator/status` 的 `state` 字段为唯一业务状态来源；当前 MAVROS 模式仅作为状态信息展示，不会因为状态与模式暂时不同而自动触发紧急告警。
 
 ### 导航器内置保护
 
@@ -380,7 +421,6 @@ config.yaml 参数分类：
 | 降落超时 | 60 s | → LANDED |
 | 紧急超时 | 120 s | → LANDED |
 | 返航超时 | takeoff_timeout × 3 | → LANDING |
-| 模式丢失 | 2 s 容忍 | → EMERGENCY |
 
 ## RViz 性能配置
 
@@ -466,7 +506,18 @@ uav_ground_station/
 │   ├── start_ground_station.sh        # 启动地面站核心
 │   ├── start_rviz.sh                  # 启动 RViz + 面板
 │   ├── start_mission.sh               # 加载航点并执行
-│   └── record_bag.sh                   # 手动录制 rosbag（起停状态）
+│   ├── record_bag.sh                   # 手动录制 rosbag（起停状态）
+│   ├── replay_bag.sh                   # 回放 rosbag + roscore + RViz
+│   └── plan_2d/                        # DLIO-SLAM 三态 2.5D A* 航点规划器
+│       ├── main.py                     # curses 键盘面板入口
+│       ├── bag_reader.py               # rosbag、逐帧点云和 odom 读取
+│       ├── cache.py                    # 按 bag 指纹缓存解码结果
+│       ├── occupancy.py                # OCCUPIED/FREE/UNKNOWN 与射线清空
+│       ├── planner.py                  # A* 与航点压缩
+│       ├── sampling.py                 # 3D 体素稀疏采样
+│       ├── config.py                   # planner 配置加载和保存
+│       ├── tui.py                      # curses 参数面板
+│       └── xml_writer.py               # waypoint_manager XML 输出
 ├── src/
 │   ├── uav_navigator/                 # ★ 导航核心包
 │   │   ├── README.md                  # 包详细文档

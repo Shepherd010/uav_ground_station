@@ -96,7 +96,7 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 1. 打点（2D Nav Goal 工具 / 手动输入表格）
    └→ plan_maker_points_ 填充 → publishPlanMakerMarkers() → RViz 显示橙色球+箭头+编号
 
-2. 🔗 连线（≥2 个点）
+2. 🔗 连线（≥1 个点，单点任务也必须完成此步骤）
    └→ publishPlanTrajectory() → RViz 显示黄色轨迹线
    └→ 状态: 打点中 → 已连线
 
@@ -128,7 +128,7 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 └→ load_waypoints client CALL → waypoint_manager 返回 PoseArray
 └→ 填充 plan_maker_points_ + 表格
 └→ publishPlanMakerMarkers() → RViz 显示
-└→ 自动连接轨迹 (≥2 点) + 等待 navigator 确认
+└→ 自动连接轨迹 (≥1 点) + 等待 navigator 确认
 └→ 状态: 已连线 → 自动 就绪（跳过手动发布）
 → 直接点 ▶ 开始任务 执行
 ```
@@ -181,10 +181,11 @@ RViz 固定面板插件（Qt5），提供航点规划、编辑、可视化、保
 
 ## 按钮状态管理
 
-`updateAllButtonStates()` 根据以下条件统一控制所有按钮启用/禁用：
+`updateAllButtonStates()` 统一以 `NavigatorStatus.state` 控制所有按钮启用/禁用；规划阶段只表示航点是否已连线/就绪，不再伪造飞行状态：
 
-- `navigator_running_` — navigator 节点是否存活
-- `plan_maker_phase_` — 当前规划阶段（PLANNING/CONNECTED/SAVED/NAVIGATING）
+- `navigator_running_` — 最近是否收到有效的 navigator 状态
+- `current_nav_state_` — `NavigatorStatus.state` 的唯一面板状态来源
+- `plan_maker_phase_` — 规划阶段（PLANNING/CONNECTED/SAVED）
 - `plan_maker_points_` — 是否有航点数据
 
 调用时机：航点变化、阶段切换、节点状态检测（每秒）、导航状态变化。

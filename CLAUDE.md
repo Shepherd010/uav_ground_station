@@ -94,7 +94,7 @@ These defaults can be overridden by setting the environment variables before run
 
 **Nodes:**
 - `navigator` — 10-state machine, publishes `mavros/setpoint_position/local` at 20Hz, handles OFFBOARD/ARM/LAND mode switching via services.
-- `safety_monitor` — Independent node monitoring communication timeout, height limits, MAVROS connection, mode anomalies. Publishes alerts to `/uav/safety/alert`.
+- `safety_monitor` — Independent node monitoring communication timeout, height limits, position jumps, MAVROS connection, and setpoint health. Publishes alerts to `/uav/safety/alert`.
 - `logger` — Subscribes to key topics and prints a formatted status summary to the terminal.
 
 **All parameters** are loaded from `config.yaml` (via `rosparam load`). No hardcoded values in the source code.
@@ -189,6 +189,7 @@ rosservice call /uav/safety/emergency_stop
 4. **Setpoints are published via `ros::Timer`.** Never use `ros::Duration::sleep()` or blocking calls in the main thread. The setpoint timer runs at the configured rate (default 20Hz) independently of the state machine timer (10Hz).
 5. **Namespace consistency.** All topic names in config files are relative. The `namespace` parameter in `config.yaml` determines the root namespace. Do not use absolute paths with leading `/` in topic names.
 6. **Waypoint validation.** The waypoint manager validates duplicates, spacing, and height range before publishing. Warnings are logged but do not block execution (non-fatal validation).
+7. **Single flight-state source.** UI workflow and flight-control availability must follow `NavigatorStatus.state`; MAVROS mode is displayed separately and must not create a second business state machine.
 
 ## Common Development Tasks
 

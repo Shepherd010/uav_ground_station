@@ -111,7 +111,8 @@ protected:
     void clearMarkers();
 
     // Plan Maker
-    enum PlanMakerPhase { PLANNING, CONNECTED, SAVED, NAVIGATING };
+    // 规划阶段不再承载飞行状态；飞行状态唯一来自 NavigatorStatus。
+    enum PlanMakerPhase { PLANNING, CONNECTED, SAVED };
     void addPlanMakerPoint(const geometry_msgs::PoseStamped &pose);
     void publishPlanMakerMarkers();
     void publishPlanTrajectory();
@@ -133,6 +134,11 @@ protected:
     // 辅助
     QString stateToString(uint8_t state);
     QString stateToColor(uint8_t state);
+    bool isMissionActiveState(uint8_t state) const;
+    bool isStartableState(uint8_t state) const;
+    bool isLandingCommandState(uint8_t state) const;
+    bool isPlanEditableState(uint8_t state) const;
+    void normalizeWaypointParameters();
 
     // ROS
     ros::NodeHandle nh_;
@@ -195,6 +201,7 @@ protected:
     int max_num_goal_;
     int current_waypoint_count_;
     uint8_t current_nav_state_;
+    bool has_nav_status_;
     bool mavros_connected_;
     bool mavros_armed_;
     std::string mavros_mode_;
@@ -205,7 +212,7 @@ protected:
     uint8_t nav_current_waypoint_idx_;
     uint8_t nav_total_waypoints_;
 
-    // Plan Maker data
+    // Plan Maker data（仅表示规划就绪程度，不表示飞行状态）
     std::vector<geometry_msgs::PoseStamped> plan_maker_points_;
     PlanMakerPhase plan_maker_phase_;
     int plan_maker_selected_index_;
@@ -216,8 +223,9 @@ protected:
     double default_hover_time_;
     double default_speed_;
 
-    // Navigator running flag
+    // Navigator status interface health
     bool navigator_running_;
+    ros::Time last_nav_status_time_;
 
     // 录制状态
     bool is_recording_;

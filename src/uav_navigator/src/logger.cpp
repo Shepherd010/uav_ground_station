@@ -141,32 +141,32 @@ std::string Logger::formatTime() {
 
 std::string Logger::stateToString(uint8_t state) {
     switch (state) {
-        case 0: return "IDLE";
-        case 1: return "PREFLT";
-        case 2: return "ARMING";
-        case 3: return "TAKEOF";
-        case 4: return "NAVIGT";
-        case 5: return "HOVER";
-        case 6: return "LAND";
-        case 7: return "LANDED";
-        case 8: return "EMRGCY";
-        case 9: return "RTH";
+        case uav_navigator::NavigatorStatus::STATE_IDLE: return "IDLE";
+        case uav_navigator::NavigatorStatus::STATE_PRE_FLIGHT: return "PREFLT";
+        case uav_navigator::NavigatorStatus::STATE_ARMING: return "ARMING";
+        case uav_navigator::NavigatorStatus::STATE_TAKEOFF: return "TAKEOF";
+        case uav_navigator::NavigatorStatus::STATE_NAVIGATING: return "NAVIGT";
+        case uav_navigator::NavigatorStatus::STATE_HOVERING: return "HOVER";
+        case uav_navigator::NavigatorStatus::STATE_LANDING: return "LAND";
+        case uav_navigator::NavigatorStatus::STATE_LANDED: return "LANDED";
+        case uav_navigator::NavigatorStatus::STATE_EMERGENCY: return "EMRGCY";
+        case uav_navigator::NavigatorStatus::STATE_RETURNING: return "RTH";
         default: return "UNKN";
     }
 }
 
 std::string Logger::stateToDisplay(uint8_t state) {
     switch (state) {
-        case 0: return "\033[34m IDLE \033[0m";      // 蓝色
-        case 1: return "\033[36mPREFLT\033[0m";      // 青色
-        case 2: return "\033[33mARMING\033[0m";      // 黄色
-        case 3: return "\033[33mTAKEOF\033[0m";      // 黄色
-        case 4: return "\033[32mNAVIGT\033[0m";      // 绿色
-        case 5: return "\033[36mHOVER \033[0m";      // 青色
-        case 6: return "\033[33mLAND  \033[0m";      // 黄色
-        case 7: return "\033[34mLANDED\033[0m";      // 蓝色
-        case 8: return "\033[31mEMRGCY\033[0m";      // 红色
-        case 9: return "\033[35m RTH  \033[0m";      // 紫色
+        case uav_navigator::NavigatorStatus::STATE_IDLE: return "\033[34m IDLE \033[0m";      // 蓝色
+        case uav_navigator::NavigatorStatus::STATE_PRE_FLIGHT: return "\033[36mPREFLT\033[0m";      // 青色
+        case uav_navigator::NavigatorStatus::STATE_ARMING: return "\033[33mARMING\033[0m";      // 黄色
+        case uav_navigator::NavigatorStatus::STATE_TAKEOFF: return "\033[33mTAKEOF\033[0m";      // 黄色
+        case uav_navigator::NavigatorStatus::STATE_NAVIGATING: return "\033[32mNAVIGT\033[0m";      // 绿色
+        case uav_navigator::NavigatorStatus::STATE_HOVERING: return "\033[36mHOVER \033[0m";      // 青色
+        case uav_navigator::NavigatorStatus::STATE_LANDING: return "\033[33mLAND  \033[0m";      // 黄色
+        case uav_navigator::NavigatorStatus::STATE_LANDED: return "\033[34mLANDED\033[0m";      // 蓝色
+        case uav_navigator::NavigatorStatus::STATE_EMERGENCY: return "\033[31mEMRGCY\033[0m";      // 红色
+        case uav_navigator::NavigatorStatus::STATE_RETURNING: return "\033[35m RTH  \033[0m";      // 紫色
         default: return "UNKN";
     }
 }

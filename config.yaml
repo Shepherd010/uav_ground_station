@@ -64,7 +64,6 @@ offboard_safety:
   min_setpoint_rate_hz: 10.0
   setpoint_timeout_warn: 0.5
   setpoint_timeout_emergency: 1.0
-  mode_mismatch_tolerance: 2.0
 
 # 位置异常检测
 position_safety:
@@ -203,3 +202,33 @@ experiment:
   planned_path_topic: "uav/trajectory/planned"
   real_path_topic: "uav/trajectory/real"
   record_control_topic: "uav/experiment/record"
+
+# ============================================================================
+# 第九类：2.5D 静态航点规划器配置
+# ============================================================================
+# 规划器使用累计地图识别障碍物，并使用逐帧点云 + odom 射线清空已观测自由空间。
+# 完全没有射线观测的区域保持 UNKNOWN，A* 不允许进入。
+planner:
+  map_topic: /robot/dlio/map_node/map
+  scan_topic: /robot/dlio/odom_node/pointcloud/deskewed
+  odom_topic: /robot/dlio/odom_node/odom
+  input_frame_id: robot/odom
+  z: 1.0
+  slice_half_height: 0.3
+  aircraft_length: 0.6
+  aircraft_width: 0.6
+  aircraft_height: 0.45
+  grid_resolution: 0.1
+  # 0.4m 保留场景覆盖，同时避免累计地图墙点在 0.1m 栅格中造成过度封闭
+  map_voxel_size: 0.4
+  scan_voxel_size: 0.3
+  min_waypoints: 2
+  max_waypoints: 20
+  min_height: 0.5
+  max_height: 2.0
+  min_waypoint_spacing: 0.3
+  output_frame_id: map
+  output_path: ~/waypoints.xml
+  cache_dir: ~/.cache/uav_ground_station/plan_2d
+  hover_time: 5.0
+  speed: 2.0

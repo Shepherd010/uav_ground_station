@@ -124,11 +124,11 @@ string message
 
 ## 关键安全机制
 
-- **OFFBOARD 预发布**：TAKEOFF 阶段先发布 N 次 setpoint（默认 100 次 @ 20Hz ≈ 5 秒），再请求 OFFBOARD 模式。PX4 要求持续 >2Hz 的 setpoint 流才能接受 OFFBOARD
+- **OFFBOARD 预发布**：非 OFFBOARD 状态在 TAKEOFF 阶段先发布 N 次 setpoint（默认 100 次 @ 20Hz ≈ 5 秒），再请求 OFFBOARD；如果已经是 OFFBOARD，则直接跳过模式切换
 - **setpoint 不间断**：由独立 `ros::Timer`（20Hz）统一发布 setpoint，与状态机逻辑解耦，避免任何代码路径阻塞 setpoint 流
 - **高度保护**：odom 回调中实时检查高度，超限直接进 EMERGENCY
 - **位置跳变检测**：相邻 odom 消息位移超过阈值（默认 2m）触发紧急
-- **模式丢失检测**：飞行中模式被切出 OFFBOARD，容忍窗口（默认 2s）后触发紧急
+- **模式信息展示**：当前 MAVROS 模式随 `NavigatorStatus.current_mode` 发布；模式切换和 RC 接管不再通过“状态/模式不一致”自动触发紧急告警
 - **超时保护**：每个状态都有独立超时（起飞 20s、降落 60s、紧急 120s）
 - **RC 接管**：PX4 硬件级 RC 优先级高于 OFFBOARD，遥控器拨杆随时可接管
 

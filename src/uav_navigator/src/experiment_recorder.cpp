@@ -120,7 +120,7 @@ ExperimentRecorder::ExperimentRecorder(ros::NodeHandle& nh, ros::NodeHandle& pnh
       has_metrics_(false), has_status_(false), has_odom_(false),
       has_setpoint_(false), has_mavros_state_(false),
       max_deviation_(0.0), cumulative_deviation_(0.0), deviation_sample_count_(0),
-      last_nav_state_(0) {
+      last_nav_state_(uav_navigator::NavigatorStatus::STATE_IDLE) {
     loadConfig();
 
     metrics_sub_ = nh_.subscribe(config_.metrics_topic, 10, &ExperimentRecorder::metricsCallback, this);

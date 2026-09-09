@@ -42,7 +42,6 @@ private:
     bool has_navigator_status_;
     uint8_t last_nav_state_;
     ros::Time last_setpoint_time_;
-    ros::Time mode_mismatch_start_time_;
     ros::Time last_odom_time_;
     ros::Time last_mavros_state_time_;       // MAVROS 状态消息最后接收时间
     geometry_msgs::Point last_odom_position_;
@@ -68,7 +67,6 @@ private:
 
         double min_setpoint_rate_hz;
         double setpoint_timeout;
-        double mode_mismatch_tolerance;
         double position_jump_distance;
         double position_jump_window;
         double alert_min_interval;          // 同类型告警最小间隔（秒）
@@ -90,13 +88,12 @@ private:
 
 SafetyMonitor::SafetyMonitor(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     : nh_(nh), pnh_(pnh), has_odom_(false), has_mavros_state_(false), has_navigator_status_(false),
-      last_nav_state_(0) {
+      last_nav_state_(uav_navigator::NavigatorStatus::STATE_IDLE) {
 
     loadConfig();
     initROS();
 
     last_setpoint_time_ = ros::Time::now();
-    mode_mismatch_start_time_ = ros::Time(0);
     last_odom_time_ = ros::Time(0);
     last_mavros_state_time_ = ros::Time(0);
     last_alert_time_ = ros::Time(0);
@@ -130,7 +127,6 @@ void SafetyMonitor::loadConfig() {
 
     global_nh.param<double>("offboard_safety/min_setpoint_rate_hz", config_.min_setpoint_rate_hz, 10.0);
     global_nh.param<double>("offboard_safety/setpoint_timeout_emergency", config_.setpoint_timeout, 1.0);
-    global_nh.param<double>("offboard_safety/mode_mismatch_tolerance", config_.mode_mismatch_tolerance, 2.0);
     global_nh.param<double>("position_safety/max_jump_distance", config_.position_jump_distance, 2.0);
     global_nh.param<double>("position_safety/jump_window", config_.position_jump_window, 0.1);
 
@@ -274,8 +270,7 @@ void SafetyMonitor::checkTimerCallback(const ros::TimerEvent& event) {
 
         // 3. setpoint 流检查（仅在飞行状态）
         // 使用 NavigatorStatus 消息常量
-        bool is_flying = (last_nav_state_ == uav_navigator::NavigatorStatus::STATE_TAKEOFF
-                       || last_nav_state_ == uav_navigator::NavigatorStatus::STATE_NAVIGATING
+        bool is_flying = (last_nav_state_ == uav_navigator::NavigatorStatus::STATE_NAVIGATING
                        || last_nav_state_ == uav_navigator::NavigatorStatus::STATE_HOVERING
                        || last_nav_state_ == uav_navigator::NavigatorStatus::STATE_RETURNING);
         if (is_flying) {
@@ -286,31 +281,14 @@ void SafetyMonitor::checkTimerCallback(const ros::TimerEvent& event) {
             }
         }
 
-        // 4. 模式一致性检查
-        if (is_flying && has_mavros_state_ && current_mavros_state_.connected) {
-            if (current_mavros_state_.mode != "OFFBOARD") {
-                if (mode_mismatch_start_time_.isZero()) {
-                    mode_mismatch_start_time_ = ros::Time::now();
-                    ROS_WARN("[SafetyMonitor] Mode mismatch: navigator flying but mode is %s",
-                             current_mavros_state_.mode.c_str());
-                } else if ((ros::Time::now() - mode_mismatch_start_time_).toSec() > config_.mode_mismatch_tolerance) {
-                    ROS_ERROR("[SafetyMonitor] Mode mismatch persisted for %.1f s, triggering emergency",
-                              config_.mode_mismatch_tolerance);
-                    publishAlert("MODE_MISMATCH");
-                    mode_mismatch_start_time_ = ros::Time(0);
-                }
-            } else {
-                mode_mismatch_start_time_ = ros::Time(0);
-            }
-        }
-
-        // 5. MAVROS 连接断开检查
+        // 4. MAVROS 连接断开检查。飞行状态与当前飞控模式不再做自动
+        // mismatch 判定，避免模式切换/RC 接管期间误触发紧急状态。
         if (has_mavros_state_ && !current_mavros_state_.connected) {
             ROS_ERROR("[SafetyMonitor] MAVROS connection lost!");
             publishAlert("MAVROS_DISCONNECTED");
         }
 
-        // 5b. MAVROS 状态消息超时检查（MAVROS 进程崩溃后消息停止到达）
+        // 4b. MAVROS 状态消息超时检查（MAVROS 进程崩溃后消息停止到达）
         if (has_mavros_state_ && !last_mavros_state_time_.isZero()) {
             double mavros_elapsed = (ros::Time::now() - last_mavros_state_time_).toSec();
             if (mavros_elapsed > config_.communication_timeout) {

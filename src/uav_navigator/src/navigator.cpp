@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <cstdint>
 
 #include <limits>
 
@@ -22,17 +23,17 @@
 namespace uav_navigator {
 
 // 状态机状态枚举
-enum class State {
-    IDLE = 0,
-    PRE_FLIGHT = 1,
-    ARMING = 2,
-    TAKEOFF = 3,
-    NAVIGATING = 4,
-    HOVERING = 5,
-    LANDING = 6,
-    LANDED = 7,
-    EMERGENCY = 8,
-    RETURNING = 9
+enum class State : uint8_t {
+    IDLE = NavigatorStatus::STATE_IDLE,
+    PRE_FLIGHT = NavigatorStatus::STATE_PRE_FLIGHT,
+    ARMING = NavigatorStatus::STATE_ARMING,
+    TAKEOFF = NavigatorStatus::STATE_TAKEOFF,
+    NAVIGATING = NavigatorStatus::STATE_NAVIGATING,
+    HOVERING = NavigatorStatus::STATE_HOVERING,
+    LANDING = NavigatorStatus::STATE_LANDING,
+    LANDED = NavigatorStatus::STATE_LANDED,
+    EMERGENCY = NavigatorStatus::STATE_EMERGENCY,
+    RETURNING = NavigatorStatus::STATE_RETURNING
 };
 
 // 状态机状态名（用于日志输出）
@@ -142,7 +143,6 @@ private:
     ros::Time last_setpoint_pub_time_;
     int setpoint_pub_count_;
     ros::Time setpoint_rate_check_start_;
-    ros::Time mode_loss_time_;
     ros::Time last_emergency_mode_req_time_;  // 紧急状态下模式请求限流
 
     // ========== 配置参数 ==========
@@ -182,7 +182,6 @@ private:
 
         // OFFBOARD 安全参数
         double min_setpoint_rate_hz;
-        double mode_mismatch_tolerance;
         double position_jump_distance;
         double position_jump_window;
 
@@ -280,7 +279,6 @@ Navigator::Navigator(ros::NodeHandle& nh, ros::NodeHandle& pnh)
     setpoint_rate_check_start_ = ros::Time::now();
     last_real_path_sample_time_ = ros::Time(0);
     last_odom_time_ = ros::Time(0);
-    mode_loss_time_ = ros::Time(0);
     last_emergency_mode_req_time_ = ros::Time(0);
 
     ROS_INFO("[Navigator] Initialization complete, current state: %s", stateToString(nav_state_));
@@ -332,6 +330,10 @@ void Navigator::loadConfig() {
         ROS_ERROR("[Navigator] setpoint_rate=%.1f is invalid, using default 20.0 Hz", config_.setpoint_rate);
         config_.setpoint_rate = 20.0;
     }
+    if (config_.offboard_pre_pub_count <= 0) {
+        ROS_WARN("[Navigator] offboard_pre_pub_count=%d is invalid, using default 100", config_.offboard_pre_pub_count);
+        config_.offboard_pre_pub_count = 100;
+    }
     if (config_.landing_timeout <= 0.0) {
         ROS_WARN("[Navigator] landing_timeout=%.1f is invalid, using default 60.0 s", config_.landing_timeout);
         config_.landing_timeout = 60.0;
@@ -346,7 +348,6 @@ void Navigator::loadConfig() {
 
     // OFFBOARD 安全参数
     global_nh.param<double>("offboard_safety/min_setpoint_rate_hz", config_.min_setpoint_rate_hz, 10.0);
-    global_nh.param<double>("offboard_safety/mode_mismatch_tolerance", config_.mode_mismatch_tolerance, 2.0);
     global_nh.param<double>("position_safety/max_jump_distance", config_.position_jump_distance, 2.0);
     global_nh.param<double>("position_safety/jump_window", config_.position_jump_window, 0.1);
 
@@ -445,17 +446,19 @@ void Navigator::localPosCallback(const nav_msgs::Odometry::ConstPtr& msg) {
 }
 
 void Navigator::waypointsCallback(const geometry_msgs::PoseArray::ConstPtr& msg) {
-    // 飞行中收到新航点时不重置索引，避免无人机突然飞回第一个航点
-    bool is_flying = (nav_state_ == State::TAKEOFF || nav_state_ == State::NAVIGATING ||
-                      nav_state_ == State::HOVERING);
+    std::lock_guard<std::mutex> lock(state_mutex_);
+
+    // 飞行中收到新航点时不重置索引，避免无人机突然飞回第一个航点。
+    // IDLE/LANDED 时允许新计划从第一个航点开始；空 PoseArray 明确表示清空计划。
+    const bool is_mission_active = nav_state_ != State::IDLE && nav_state_ != State::LANDED;
     waypoints_ = *msg;
-    has_waypoints_ = true;
-    if (!is_flying) {
+    has_waypoints_ = !waypoints_.poses.empty();
+    if (!is_mission_active || waypoints_.poses.empty()) {
         current_waypoint_idx_ = 0;
     } else {
         // 飞行中收到新航点：保持当前索引，但限制不超过新航点数量
         if (current_waypoint_idx_ >= waypoints_.poses.size()) {
-            current_waypoint_idx_ = waypoints_.poses.size() > 0 ? waypoints_.poses.size() - 1 : 0;
+            current_waypoint_idx_ = waypoints_.poses.size() - 1;
         }
         ROS_WARN("[Navigator] Waypoints updated mid-flight, keeping current index %zu (new total: %zu)",
                  current_waypoint_idx_, waypoints_.poses.size());
@@ -465,19 +468,29 @@ void Navigator::waypointsCallback(const geometry_msgs::PoseArray::ConstPtr& msg)
 }
 
 void Navigator::safetyAlertCallback(const std_msgs::String::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     ROS_WARN("[Navigator] Received safety alert: %s", msg->data.c_str());
 
-    if (msg->data == "EMERGENCY_STOP" || msg->data == "HEIGHT_EXCEEDED") {
+    // SafetyMonitor 使用明确的告警类型；这些告警必须进入同一个 Navigator 状态机，
+    // 不能由 panel 或 MAVROS mode 另行推断状态。
+    if (msg->data == "EMERGENCY_STOP" || msg->data == "HEIGHT_EXCEEDED"
+        || msg->data == "POSITION_JUMP" || msg->data == "SETPOINT_TIMEOUT"
+        || msg->data == "MAVROS_DISCONNECTED" || msg->data == "MAVROS_TIMEOUT"
+        || msg->data == "SAFETY_MONITOR_ERROR") {
         enterEmergency(msg->data);
-    } else if (msg->data == "COMMUNICATION_TIMEOUT") {
-        if (nav_state_ == State::TAKEOFF || nav_state_ == State::NAVIGATING || nav_state_ == State::HOVERING) {
+    } else if (msg->data == "NAVIGATOR_TIMEOUT" || msg->data == "COMMUNICATION_TIMEOUT") {
+        if (nav_state_ == State::TAKEOFF || nav_state_ == State::NAVIGATING
+            || nav_state_ == State::HOVERING || nav_state_ == State::RETURNING) {
             ROS_WARN("[Navigator] Communication timeout, triggering return to home");
-            transitionState(State::RETURNING);
+            if (nav_state_ != State::RETURNING) {
+                transitionState(State::RETURNING);
+            }
         }
     }
 }
 
 void Navigator::configReloadCallback(const std_msgs::String::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
     ROS_INFO("[Navigator] Reloading configuration from rosparam (source: %s)", msg->data.c_str());
     loadConfig();
     double setpoint_period = 1.0 / config_.setpoint_rate;
@@ -551,8 +564,10 @@ bool Navigator::commandCallback(uav_navigator::NavigatorCommand::Request& req,
     } else if (req.command == "RESET") {
         if (nav_state_ == State::EMERGENCY || nav_state_ == State::LANDED) {
             transitionState(State::IDLE);
-            has_waypoints_ = false;
+            // 保留当前已确认的航点。面板的“就绪”状态代表这份计划仍可再次执行；
+            // 只有面板明确清空航点时才由空 PoseArray 清除它。
             current_waypoint_idx_ = 0;
+            has_home_position_ = false;
             emergency_triggered_ = false;
             emergency_reason_.clear();
             res.success = true;
@@ -644,9 +659,16 @@ void Navigator::transitionState(State new_state) {
             break;
         case State::TAKEOFF:
             last_mode_request_time_ = ros::Time::now();
-            // 重置预发布计数
-            pre_pub_count_ = config_.offboard_pre_pub_count;
-            offboard_pre_pub_complete_ = false;
+            // 已经处于 OFFBOARD 时，setpoint 流已经满足模式前置条件，直接跳过
+            // 预发布和模式切换；否则才执行 PX4 所需的预发布阶段。
+            if (mavros_state_.mode == "OFFBOARD") {
+                pre_pub_count_ = 0;
+                offboard_pre_pub_complete_ = true;
+                ROS_INFO("[Navigator] Already in OFFBOARD mode, skipping mode switch");
+            } else {
+                pre_pub_count_ = config_.offboard_pre_pub_count;
+                offboard_pre_pub_complete_ = false;
+            }
             // 设置起飞目标setpoint：始终使用起飞高度，避免has_odom_为false时保持默认z=0
             if (has_odom_) {
                 setSetpointXYZ(current_odom_.pose.pose.position.x,
@@ -768,6 +790,14 @@ void Navigator::handleArming() {
 }
 
 void Navigator::handleTakeoff() {
+    // 如果在预发布期间由外部（例如 RC）切入 OFFBOARD，也立即采用当前模式，
+    // 不再请求模式切换或等待完整预发布周期。
+    if (!offboard_pre_pub_complete_ && mavros_state_.mode == "OFFBOARD") {
+        pre_pub_count_ = 0;
+        offboard_pre_pub_complete_ = true;
+        ROS_INFO("[Navigator] OFFBOARD detected, skipping remaining pre-publish phase");
+    }
+
     // Phase 1: 预发布setpoint（PX4需要持续收到>2Hz setpoint流才能接受OFFBOARD模式）
     if (!offboard_pre_pub_complete_) {
         // 监控 setpoint 发布率
@@ -829,21 +859,6 @@ void Navigator::handleTakeoff() {
 }
 
 void Navigator::handleNavigating() {
-    // 模式异常检测：飞行中模式被切出 OFFBOARD
-    if (mavros_state_.mode != "OFFBOARD") {
-        if (mode_loss_time_.isZero()) {
-            mode_loss_time_ = ros::Time::now();
-            ROS_WARN("[Navigator] Mode lost while navigating: %s", mavros_state_.mode.c_str());
-        } else if ((ros::Time::now() - mode_loss_time_).toSec() > config_.mode_mismatch_tolerance) {
-            ROS_ERROR("[Navigator] Mode not restored to OFFBOARD for %.1f s, triggering emergency",
-                      config_.mode_mismatch_tolerance);
-            enterEmergency("Mode lost in flight");
-            return;
-        }
-    } else {
-        mode_loss_time_ = ros::Time(0);
-    }
-
     if (!has_waypoints_) {
         ROS_ERROR("[Navigator] Lost waypoint data during navigation, starting landing");
         transitionState(State::LANDING);
@@ -1080,6 +1095,11 @@ bool Navigator::requestArming(bool arm) {
 }
 
 bool Navigator::requestMode(const std::string& mode) {
+    // 模式已经是目标模式时绝不重复调用 MAVROS 服务。
+    if (mavros_state_.mode == mode) {
+        return true;
+    }
+
     // 检查服务是否可用
     if (!set_mode_client_.exists()) {
         ROS_ERROR_THROTTLE(5.0, "[Navigator] Mode switch service unavailable: %s", config_.set_mode_service.c_str());
@@ -1205,9 +1225,12 @@ bool Navigator::checkPreFlight() {
         return false;
     }
 
-    // 检查位置数据是否有效（使用容差比较，避免浮点精度问题）
-    if (std::abs(current_odom_.pose.pose.position.z) < 1e-6) {
-        ROS_WARN_THROTTLE(2.0, "[Navigator] Pre-flight check: position height near zero, sensor may not be initialized...");
+    // 地面上的 z≈0 是正常起飞条件，不能把它当作传感器未初始化；只拒绝
+    // NaN/Inf 等真正无效的位置数据。
+    const auto& position = current_odom_.pose.pose.position;
+    if (!std::isfinite(position.x) || !std::isfinite(position.y)
+        || !std::isfinite(position.z)) {
+        ROS_WARN_THROTTLE(2.0, "[Navigator] Pre-flight check: position contains NaN/Inf");
         return false;
     }
 

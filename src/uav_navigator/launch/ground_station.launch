@@ -2,6 +2,9 @@
 <!-- Starts: roscore (via roslaunch) + config loading + safety monitor + waypoint manager + navigator -->
 <!-- Run on: ground station -->
 <launch>
+    <!-- Remove the obsolete mode-mismatch parameter left by older sessions. -->
+    <rosparam command="delete" param="offboard_safety/mode_mismatch_tolerance" />
+
     <!-- Load global navigator and safety configuration -->
     <rosparam command="load" file="$(find uav_navigator)/../../config.yaml" />
 
