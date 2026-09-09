@@ -20,6 +20,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Project planning documents (kept outside the source history)
+doc/
+
 # ROS
 *.bag
 *.active
